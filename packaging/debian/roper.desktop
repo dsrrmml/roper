@@ -2,8 +2,8 @@
 Version=1.0
 Type=Application
 Name=ROPER
-GenericName=Rap lyrics editor
-Comment=Write and organize rap lyrics and raw material
+GenericName=Lyrics editor
+Comment=Write and organize lyrics and raw material
 Exec=roper
 TryExec=roper
 Icon=org.rmml.roper
@@ -11,4 +11,4 @@ Terminal=false
 Categories=Utility;TextEditor;
 StartupNotify=true
 StartupWMClass=org.rmml.roper
-Keywords=rap;lyrics;text;editor;writing;
+Keywords=music;lyrics;text;editor;writing;

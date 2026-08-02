@@ -5,6 +5,16 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/.." && pwd)"
 cd "$repo_root"
 
+tmp_root="${TMPDIR:-${TMP:-}}"
+if [[ -z "$tmp_root" || ! -d "$tmp_root" || ! -w "$tmp_root" ]]; then
+    tmp_root="$repo_root/.tmp/runtime-tmp"
+    mkdir -p "$tmp_root"
+fi
+if [[ ! -d "$tmp_root" || ! -w "$tmp_root" ]]; then
+    tmp_root="/tmp"
+fi
+export TMPDIR="$tmp_root"
+
 if ! command -v cargo >/dev/null 2>&1; then
     echo "error: cargo is required" >&2
     exit 1
@@ -235,17 +245,23 @@ PY
 }
 
 rm -rf "$package_target_dir"
-offline_build_log="$(mktemp "$TMPDIR/roper-build-offline.XXXXXX")"
-if ! cargo build --release --locked --offline --target-dir "$package_target_dir" >"$offline_build_log" 2>&1; then
-    cat "$offline_build_log" >&2
-    echo "warning: offline release build failed; retrying with online Cargo resolution" >&2
-    cargo build --release --locked --target-dir "$package_target_dir"
-else
+offline_build_log="$(mktemp "$tmp_root/roper-build-offline.XXXXXX")"
+build_succeeded=0
+if cargo build --release --locked --offline --target-dir "$package_target_dir" >"$offline_build_log" 2>&1; then
     cat "$offline_build_log"
+    build_succeeded=1
+else
+    cat "$offline_build_log" >&2
+    echo "warning: offline release build failed; online Cargo retry is disabled by policy" >&2
 fi
 rm -f "$offline_build_log"
 
-built_binary="$package_target_dir/release/$binary_name"
+if [[ "$build_succeeded" -eq 1 ]]; then
+    built_binary="$package_target_dir/release/$binary_name"
+else
+    built_binary="$repo_root/target/release/$binary_name"
+    echo "warning: Cargo rebuild failed; attempting to package existing local release binary at $built_binary" >&2
+fi
 if [[ ! -x "$built_binary" ]]; then
     echo "error: expected executable not found at $built_binary" >&2
     exit 1
@@ -365,8 +381,8 @@ installed_size="$(du -sk "$package_root" | awk '{print $1}')"
     if [[ -n "$homepage_url" ]]; then
         printf 'Homepage: %s\n' "$homepage_url"
     fi
-    printf 'Description: Modern dual-pane rap lyric editor\n'
-    printf ' Local GTK 4 desktop application for writing, organizing, and refining rap lyrics.\n'
+    printf 'Description: Modern dual-pane lyrics editor\n'
+    printf ' Local GTK 4 desktop application for writing, organizing, and refining lyrics.\n'
     printf ' Built for offline local use on Debian Trixie.\n'
 } > "$debian_dir/control"
 

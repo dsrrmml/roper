@@ -7,10 +7,10 @@
   <developer id="org.rmml">
     <name>RMML</name>
   </developer>
-  <summary>Local desktop editor for focused rap lyric writing</summary>
+  <summary>Local desktop editor for focused lyric writing</summary>
   <description>
     <p>
-      ROPER is a local GTK 4 desktop editor for writing, organizing, and refining rap lyrics.
+      ROPER is a local GTK 4 desktop editor for writing, organizing, and refining lyrics.
       It provides a focused two-pane workspace for developing finished lines alongside raw material.
     </p>
     <p>

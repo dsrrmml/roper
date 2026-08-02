@@ -5,7 +5,18 @@ script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd -- "$script_dir/.." && pwd)"
 cd "$repo_root"
 
+tmp_root="${TMPDIR:-${TMP:-}}"
+if [[ -z "$tmp_root" || ! -d "$tmp_root" || ! -w "$tmp_root" ]]; then
+    tmp_root="$repo_root/.tmp/runtime-tmp"
+    mkdir -p "$tmp_root"
+fi
+if [[ ! -d "$tmp_root" || ! -w "$tmp_root" ]]; then
+    tmp_root="/tmp"
+fi
+export TMPDIR="$tmp_root"
+
 tmp_dir=""
+tree_validation_output=""
 
 package_path="${1:-}"
 if [[ -z "$package_path" ]]; then
@@ -18,12 +29,12 @@ if [[ -z "$package_path" || ! -f "$package_path" ]]; then
 fi
 
 desktop-file-validate "$repo_root/packaging/debian/roper.desktop"
-appstream_output="$(mktemp "$TMPDIR/roper-appstream.XXXXXX")"
-trap 'rm -f "$appstream_output"; rm -rf "$tmp_dir"' EXIT
+appstream_output="$(mktemp "$tmp_root/roper-appstream.XXXXXX")"
+trap 'rm -f "$appstream_output" "$tree_validation_output"; rm -rf "$tmp_dir"' EXIT
 if ! appstreamcli validate --no-net "$repo_root/packaging/debian/org.rmml.roper.metainfo.xml" >"$appstream_output" 2>&1; then
-    if grep -q 'url-homepage-missing' "$appstream_output" && ! grep -q '^E:' "$appstream_output"; then
+    if grep -Eq 'url-homepage-missing|url-not-reachable' "$appstream_output" && ! grep -q '^E:' "$appstream_output"; then
         cat "$appstream_output"
-        echo "warning: AppStream validation reported only missing homepage metadata; continuing without inventing a URL" >&2
+        echo "warning: AppStream validation reported only non-fatal URL metadata/network warnings; continuing" >&2
     else
         cat "$appstream_output" >&2
         exit 1
@@ -35,15 +46,15 @@ fi
 dpkg-deb --info "$package_path"
 dpkg-deb --contents "$package_path"
 
-tmp_dir="$(mktemp -d "$TMPDIR/roper-validate.XXXXXX")"
+tmp_dir="$(mktemp -d "$tmp_root/roper-validate.XXXXXX")"
 
 dpkg-deb --extract "$package_path" "$tmp_dir"
 
-tree_validation_output="$(mktemp "$TMPDIR/roper-appstream-tree.XXXXXX")"
+tree_validation_output="$(mktemp "$tmp_root/roper-appstream-tree.XXXXXX")"
 if ! appstreamcli validate-tree "$tmp_dir" >"$tree_validation_output" 2>&1; then
-    if grep -q 'url-homepage-missing' "$tree_validation_output" && ! grep -q '^E:' "$tree_validation_output"; then
+    if grep -Eq 'url-homepage-missing|url-not-reachable' "$tree_validation_output" && ! grep -q '^E:' "$tree_validation_output"; then
         cat "$tree_validation_output"
-        echo "warning: AppStream tree validation reported only missing homepage metadata; continuing without inventing a URL" >&2
+        echo "warning: AppStream tree validation reported only non-fatal URL metadata/network warnings; continuing" >&2
     else
         cat "$tree_validation_output" >&2
         exit 1
