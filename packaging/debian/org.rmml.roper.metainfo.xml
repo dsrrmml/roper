@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.rmml.roper.desktop</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>Unlicense</project_license>
+  <name>ROPER</name>
+  <developer id="org.rmml">
+    <name>RMML</name>
+  </developer>
+  <summary>Local desktop editor for focused rap lyric writing</summary>
+  <description>
+    <p>
+      ROPER is a local GTK 4 desktop editor for writing, organizing, and refining rap lyrics.
+      It provides a focused two-pane workspace for developing finished lines alongside raw material.
+    </p>
+    <p>
+      The application is designed for offline use and keeps writing workflows local to the machine.
+      It includes artist and track organization, artwork support, built-in search, and keyboard-friendly editing.
+    </p>
+  </description>
+  <launchable type="desktop-id">org.rmml.roper.desktop</launchable>
+  <url type="homepage">https://github.com/dsrrmml/roper</url>
+  <pkgname>roper</pkgname>
+  <icon type="stock">org.rmml.roper</icon>
+  <categories>
+    <category>Utility</category>
+    <category>TextEditor</category>
+  </categories>
+  <provides>
+    <binary>roper</binary>
+  </provides>
+  <content_rating type="oars-1.1"/>
+</component>

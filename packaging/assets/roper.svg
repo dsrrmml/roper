@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" role="img" aria-labelledby="title desc">
+  <title id="title">ROPER application icon</title>
+  <desc id="desc">Black square icon with a white stylized capital R derived from the existing ROPER artwork.</desc>
+  <rect width="256" height="256" fill="#000000"/>
+  <path
+    d="M 28 28 H 124
+       C 171 28 202 58 202 104
+       C 202 150 171 179 124 179
+       H 92
+       M 28 172 V 228
+       M 92 172 L 171 228"
+    fill="none"
+    stroke="#ffffff"
+    stroke-width="14"
+    stroke-linecap="square"
+    stroke-linejoin="miter"/>
+</svg>
