@@ -537,6 +537,13 @@ impl IdeasWorkspace {
             });
         }
 
+        for view in [&self.in_out_view, &self.verses_view, &self.hooks_view] {
+            view.connect_paste_clipboard(move |view| {
+                view.stop_signal_emission_by_name("paste-clipboard");
+                paste_plain_text_with_trailing_newline(view);
+            });
+        }
+
         for buffer in [&self.in_out_buffer, &self.verses_buffer, &self.hooks_buffer] {
             let this = self.clone_handles();
             buffer.connect_changed(move |_| {
@@ -1541,7 +1548,47 @@ fn structure_tool_button(label: &str, css_class: &str) -> gtk::Button {
 }
 
 fn insert_structure_tag_at_cursor(buffer: &gtk::TextBuffer, tag: &str) {
-    buffer.insert_at_cursor(&format!("{tag}\n"));
+    let cursor = buffer.cursor_position().max(0) as usize;
+    let text = buffer_text(buffer);
+    let before: String = text.chars().take(cursor).collect();
+    let after: String = text.chars().skip(cursor).collect();
+
+    let mut insertion = String::new();
+    if !before.is_empty() && !before.ends_with('\n') {
+        insertion.push('\n');
+    }
+    insertion.push_str(tag);
+    insertion.push('\n');
+    if !after.is_empty() && !after.starts_with('\n') {
+        insertion.push('\n');
+    }
+
+    let mut iter = buffer.iter_at_offset(cursor as i32);
+    buffer.insert(&mut iter, &insertion);
+}
+
+fn paste_plain_text_with_trailing_newline(view: &gtk::TextView) {
+    let clipboard = view.clipboard();
+    let view = view.clone();
+    clipboard.read_text_async(None::<&gtk::gio::Cancellable>, move |result| {
+        let Ok(Some(text)) = result else {
+            return;
+        };
+        if text.is_empty() {
+            return;
+        }
+
+        let mut insertion = text.to_string();
+        if !insertion.ends_with('\n') {
+            insertion.push('\n');
+        }
+
+        let buffer = view.buffer();
+        buffer.begin_user_action();
+        buffer.delete_selection(true, view.is_editable());
+        buffer.insert_interactive_at_cursor(insertion.as_str(), view.is_editable());
+        buffer.end_user_action();
+    });
 }
 
 fn next_idea_structure_number(text: &str, kind: IdeaStructureKind) -> usize {

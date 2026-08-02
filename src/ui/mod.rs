@@ -24,13 +24,13 @@ pub fn run() -> gtk::glib::ExitCode {
         app_logging::log_info(format!("log file: {}", log_path.display()));
     }
     install_log_filter();
-    gtk::Window::set_default_icon_name(APP_ICON_NAME);
     let app = gtk::Application::builder()
         .application_id(APP_ID)
         .flags(gtk::gio::ApplicationFlags::NON_UNIQUE)
         .build();
 
     app.connect_startup(|_| {
+        gtk::Window::set_default_icon_name(APP_ICON_NAME);
         load_css();
     });
 

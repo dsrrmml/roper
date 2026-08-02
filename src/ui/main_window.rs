@@ -7,7 +7,7 @@ use crate::persistence::settings_store::{AppSettings, SettingsStore, VALID_FONT_
 use crate::persistence::track_store::{
     TrackDraft, TrackListItem, TrackPager, TrackPaths, TrackStore,
 };
-use crate::services::artwork::import_track_artwork;
+use crate::services::artwork::{import_track_artwork, preferred_track_artwork_in_working_directory};
 use crate::services::casing::apply_casing;
 use crate::services::live_highlights::{STRUCTURE_BUCKETS, StructureKind, structure_sequence};
 use crate::services::material_usage::{
@@ -33,10 +33,10 @@ use crate::ui::{
 };
 use gtk::prelude::*;
 use std::cell::{Cell, RefCell};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::f64::consts::{PI, TAU};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -70,9 +70,24 @@ struct InfoMetric {
 #[derive(Clone)]
 struct EditorStatsWidgets {
     root: gtk::Box,
-    lines: gtk::Label,
-    words: gtk::Label,
-    chars: gtk::Label,
+    lines: SplitStatBubbleWidgets,
+    words: SplitStatBubbleWidgets,
+    chars: SplitStatBubbleWidgets,
+}
+
+#[derive(Clone)]
+struct TrackStatsWidgets {
+    root: gtk::Box,
+    lines: SplitStatBubbleWidgets,
+    words: SplitStatBubbleWidgets,
+    chars: SplitStatBubbleWidgets,
+}
+
+#[derive(Clone)]
+struct SplitStatBubbleWidgets {
+    root: gtk::Box,
+    raw: gtk::Label,
+    final_pane: gtk::Label,
 }
 
 #[derive(Clone)]
@@ -84,11 +99,17 @@ struct StructureToolWidgets {
     outro: gtk::Button,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 struct EditorTextStats {
     lines: usize,
     words: usize,
     chars: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct PaneTextStats {
+    raw: EditorTextStats,
+    final_pane: EditorTextStats,
 }
 
 struct OpenTrack {
@@ -143,6 +164,7 @@ struct MainState {
     programmatic_text_change: bool,
     loading_page: bool,
     search_marker_layer: Option<gtk::DrawingArea>,
+    track_stats_widgets: HashMap<String, TrackStatsWidgets>,
     ideas_mode_active: bool,
 }
 
@@ -188,6 +210,7 @@ pub fn show_in_window(window: &gtk::ApplicationWindow, artist: Artist) {
         programmatic_text_change: false,
         loading_page: false,
         search_marker_layer: None,
+        track_stats_widgets: HashMap::new(),
         ideas_mode_active: false,
     }));
 
@@ -339,11 +362,14 @@ pub fn show_in_window(window: &gtk::ApplicationWindow, artist: Artist) {
     let overlay = {
         let holder = overlay_holder.clone();
         let background_blur = background_blur.clone();
+        let state = state.clone();
+        let artwork = artwork.clone();
         Rc::new(TrackOverlay::new(
             move || {
                 if let Some(overlay) = holder.borrow().as_ref() {
                     overlay.hide();
                 }
+                update_artwork(&state, &artwork);
             },
             move |visible| background_blur.set_blurred(visible),
         ))
@@ -398,7 +424,7 @@ pub fn show_in_window(window: &gtk::ApplicationWindow, artist: Artist) {
         &editor_chrome,
         &editor_chrome_spacer,
     );
-    wire_editor_stats(&editors, &editor_stats);
+    wire_editor_stats(&state, &editors, &editor_stats);
     update_editor_stats(&editor_stats, &editors);
     wire_structure_tool(&editors, &structure_button, &structure_tool);
 
@@ -1081,6 +1107,7 @@ fn show_create_track_panel(
     directory_row.append(&choose_directory);
 
     let artwork_source: Rc<RefCell<Option<PathBuf>>> = Rc::new(RefCell::new(None));
+    let artwork_selection_is_manual = Rc::new(Cell::new(false));
     let (artwork_picker, artwork_preview, artwork_placeholder) =
         track_artwork_picker(None, "Choose artwork");
 
@@ -1157,14 +1184,25 @@ fn show_create_track_panel(
     }
 
     {
+        let state = state.clone();
+        let artwork = artwork.clone();
         let overlay = overlay.clone();
-        close.connect_clicked(move |_| overlay.clear_edit());
+        close.connect_clicked(move |_| {
+            update_artwork(&state, &artwork);
+            overlay.clear_edit();
+        });
     }
 
     {
         let window = window.clone();
         let working_directory = working_directory.clone();
         let working_directory_source = working_directory_source.clone();
+        let artwork_source = artwork_source.clone();
+        let artwork_selection_is_manual = artwork_selection_is_manual.clone();
+        let artwork_preview = artwork_preview.clone();
+        let artwork_placeholder = artwork_placeholder.clone();
+        let artwork = artwork.clone();
+        let state = state.clone();
         let error = error.clone();
         let update = update_validity.clone();
         let chooser_button = choose_directory.clone();
@@ -1178,6 +1216,12 @@ fn show_create_track_panel(
             );
             let working_directory = working_directory.clone();
             let working_directory_source = working_directory_source.clone();
+            let artwork_source = artwork_source.clone();
+            let artwork_selection_is_manual = artwork_selection_is_manual.clone();
+            let artwork_preview = artwork_preview.clone();
+            let artwork_placeholder = artwork_placeholder.clone();
+            let artwork = artwork.clone();
+            let state = state.clone();
             let error = error.clone();
             let update = update.clone();
             chooser.connect_response(move |chooser, response| {
@@ -1185,7 +1229,22 @@ fn show_create_track_panel(
                     if let Some(path) = chooser.file().and_then(|file| file.path()) {
                         if validate_absolute_path(&path, "working_directory").is_ok() {
                             working_directory.set_text(&path.to_string_lossy());
-                            *working_directory_source.borrow_mut() = Some(path);
+                            *working_directory_source.borrow_mut() = Some(path.clone());
+                            if !artwork_selection_is_manual.get() {
+                                let auto_artwork = preferred_track_artwork_in_working_directory(&path);
+                                set_track_artwork_preview(
+                                    &artwork_preview,
+                                    &artwork_placeholder,
+                                    &artwork_source,
+                                    &artwork,
+                                    auto_artwork.as_deref(),
+                                );
+                                if auto_artwork.is_some() {
+                                    notifications::clear(&error);
+                                } else {
+                                    update_artwork(&state, &artwork);
+                                }
+                            }
                             notifications::clear(&error);
                             update();
                         } else {
@@ -1205,8 +1264,10 @@ fn show_create_track_panel(
     {
         let window = window.clone();
         let artwork_source = artwork_source.clone();
+        let artwork_selection_is_manual = artwork_selection_is_manual.clone();
         let artwork_preview = artwork_preview.clone();
         let artwork_placeholder = artwork_placeholder.clone();
+        let artwork = artwork.clone();
         let error = error.clone();
         let click = gtk::GestureClick::new();
         click.connect_released(move |_, _, _, _| {
@@ -1222,17 +1283,24 @@ fn show_create_track_panel(
             filter.add_mime_type("image/jpeg");
             chooser.add_filter(&filter);
             let artwork_source = artwork_source.clone();
+            let artwork_selection_is_manual = artwork_selection_is_manual.clone();
             let artwork_preview = artwork_preview.clone();
             let artwork_placeholder = artwork_placeholder.clone();
+            let artwork = artwork.clone();
             let error = error.clone();
             chooser.connect_response(move |chooser, response| {
                 if response == gtk::ResponseType::Accept {
                     if let Some(path) = chooser.file().and_then(|file| file.path()) {
                         match validate_artwork_path(&path) {
                             Ok(()) => {
-                                artwork_preview.set_from_file(Some(&path));
-                                artwork_placeholder.set_visible(false);
-                                *artwork_source.borrow_mut() = Some(path);
+                                artwork_selection_is_manual.set(true);
+                                set_track_artwork_preview(
+                                    &artwork_preview,
+                                    &artwork_placeholder,
+                                    &artwork_source,
+                                    &artwork,
+                                    Some(&path),
+                                );
                                 notifications::clear(&error);
                             }
                             Err(err) => notifications::show_error(&error, err.to_string()),
@@ -1339,6 +1407,7 @@ fn open_track_overlay(
 ) {
     flush_current(state, editors, notice);
     overlay.select_tab(OverlayTab::Tracks);
+    state.borrow_mut().track_stats_widgets.clear();
     overlay.clear_list();
     overlay.clear_edit();
     let active_artist = state.borrow().artist.clone();
@@ -1487,7 +1556,12 @@ fn track_row(
     name.set_ellipsize(gtk::pango::EllipsizeMode::End);
     labels.append(&name);
     labels.append(&track_meta_bubbles(&item.settings));
-    labels.append(&track_text_stats_bubbles(&item.paths));
+    let stats = track_text_stats_bubbles(&item, state, editors);
+    labels.append(&stats.root);
+    state
+        .borrow_mut()
+        .track_stats_widgets
+        .insert(item.settings.id.clone(), stats.clone());
     let structures = track_structure_bubbles(&item.paths);
     if structures.first_child().is_some() {
         labels.append(&structures);
@@ -1701,26 +1775,33 @@ fn track_meta_bubble(text: &str) -> gtk::Label {
     bubble
 }
 
-fn track_text_stats_bubbles(paths: &TrackPaths) -> gtk::Box {
-    let bubbles = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-    bubbles.add_css_class("track-stats-bubbles");
-    bubbles.set_hexpand(false);
-    bubbles.set_vexpand(false);
-    bubbles.set_halign(gtk::Align::Start);
-    bubbles.set_valign(gtk::Align::Start);
+fn track_text_stats_bubbles(
+    item: &TrackListItem,
+    state: &Rc<RefCell<MainState>>,
+    editors: &Rc<EditorPanes>,
+) -> TrackStatsWidgets {
+    let root = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    root.add_css_class("track-stats-bubbles");
+    root.set_hexpand(false);
+    root.set_vexpand(false);
+    root.set_halign(gtk::Align::Start);
+    root.set_valign(gtk::Align::Start);
 
-    let stats = fs::read_to_string(&paths.raw_path)
-        .map(|text| editor_text_stats(&text))
-        .unwrap_or(EditorTextStats {
-            lines: 0,
-            words: 0,
-            chars: 0,
-        });
+    let lines = split_stat_bubble("Lines — left raw / right final", "track-stat-bubble");
+    let words = split_stat_bubble("Words — left raw / right final", "track-stat-bubble");
+    let chars = split_stat_bubble("Characters — left raw / right final", "track-stat-bubble");
+    root.append(&lines.root);
+    root.append(&words.root);
+    root.append(&chars.root);
 
-    bubbles.append(&track_meta_bubble(&format!("{} lines", stats.lines)));
-    bubbles.append(&track_meta_bubble(&format!("{} words", stats.words)));
-    bubbles.append(&track_meta_bubble(&format!("{} chars", stats.chars)));
-    bubbles
+    let widgets = TrackStatsWidgets {
+        root,
+        lines,
+        words,
+        chars,
+    };
+    update_track_stats_widgets(&widgets, track_row_stats(item, state, editors));
+    widgets
 }
 
 fn row_action_stack(edit: gtk::Button, remove: gtk::Button, row_height: i32) -> gtk::Box {
@@ -2503,6 +2584,10 @@ fn update_artwork(state: &Rc<RefCell<MainState>>, picture: &gtk::Picture) {
         .current
         .as_ref()
         .and_then(|open| open.settings.artwork.clone());
+    set_background_artwork_preview(picture, artwork.as_deref());
+}
+
+fn set_background_artwork_preview(picture: &gtk::Picture, artwork: Option<&Path>) {
     if let Some(path) = artwork {
         picture.set_file(Option::<&gtk::gio::File>::None);
         let file = gtk::gio::File::for_path(path);
@@ -2511,6 +2596,26 @@ fn update_artwork(state: &Rc<RefCell<MainState>>, picture: &gtk::Picture) {
     } else {
         picture.set_file(Option::<&gtk::gio::File>::None);
         picture.set_visible(false);
+    }
+}
+
+fn set_track_artwork_preview(
+    artwork_preview: &gtk::Image,
+    artwork_placeholder: &gtk::Label,
+    artwork_source: &Rc<RefCell<Option<PathBuf>>>,
+    artwork_background: &gtk::Picture,
+    artwork: Option<&Path>,
+) {
+    if let Some(path) = artwork {
+        artwork_preview.set_from_file(Some(path));
+        artwork_preview.set_visible(true);
+        artwork_placeholder.set_visible(false);
+        *artwork_source.borrow_mut() = Some(path.to_path_buf());
+        set_background_artwork_preview(artwork_background, Some(path));
+    } else {
+        artwork_preview.set_visible(false);
+        artwork_placeholder.set_visible(true);
+        *artwork_source.borrow_mut() = None;
     }
 }
 
@@ -2601,12 +2706,12 @@ fn editor_stats_widgets() -> EditorStatsWidgets {
     root.set_hexpand(false);
     root.set_vexpand(false);
 
-    let lines = editor_stat_bubble("L");
-    let words = editor_stat_bubble("W");
-    let chars = editor_stat_bubble("C");
-    root.append(&lines);
-    root.append(&words);
-    root.append(&chars);
+    let lines = split_stat_bubble("Lines — left raw / right final", "editor-stat-bubble");
+    let words = split_stat_bubble("Words — left raw / right final", "editor-stat-bubble");
+    let chars = split_stat_bubble("Characters — left raw / right final", "editor-stat-bubble");
+    root.append(&lines.root);
+    root.append(&words.root);
+    root.append(&chars.root);
 
     EditorStatsWidgets {
         root,
@@ -2616,50 +2721,70 @@ fn editor_stats_widgets() -> EditorStatsWidgets {
     }
 }
 
-fn editor_stat_bubble(label: &str) -> gtk::Label {
-    let bubble = gtk::Label::new(None);
-    bubble.add_css_class("editor-stat-bubble");
-    bubble.set_use_markup(true);
-    bubble.set_tooltip_text(Some(match label {
-        "L" => "Final lines / raw lines",
-        "W" => "Final words / raw words",
-        "C" => "Final characters / raw characters",
-        _ => "Final / raw",
-    }));
-    bubble
+fn split_stat_bubble(tooltip: &str, css_class: &str) -> SplitStatBubbleWidgets {
+    let root = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    root.add_css_class(css_class);
+    root.set_hexpand(false);
+    root.set_vexpand(false);
+    root.set_halign(gtk::Align::Start);
+    root.set_valign(gtk::Align::Center);
+    root.set_tooltip_text(Some(tooltip));
+
+    let raw = gtk::Label::new(None);
+    raw.add_css_class("stat-bubble-segment");
+    raw.add_css_class("stat-bubble-raw");
+
+    let final_pane = gtk::Label::new(None);
+    final_pane.add_css_class("stat-bubble-segment");
+    final_pane.add_css_class("stat-bubble-final");
+
+    if css_class == "editor-stat-bubble" {
+        raw.add_css_class("editor-stat-segment");
+        final_pane.add_css_class("editor-stat-segment");
+    } else {
+        raw.add_css_class("track-stat-segment");
+        final_pane.add_css_class("track-stat-segment");
+    }
+
+    root.append(&raw);
+    root.append(&final_pane);
+
+    SplitStatBubbleWidgets {
+        root,
+        raw,
+        final_pane,
+    }
 }
 
-fn wire_editor_stats(editors: &Rc<EditorPanes>, widgets: &EditorStatsWidgets) {
+fn wire_editor_stats(
+    state: &Rc<RefCell<MainState>>,
+    editors: &Rc<EditorPanes>,
+    widgets: &EditorStatsWidgets,
+) {
     {
+        let state = state.clone();
         let editors_for_signal = editors.clone();
         let editors_for_callback = editors.clone();
         let widgets = widgets.clone();
         editors_for_signal.final_buffer.connect_changed(move |_| {
             update_editor_stats(&widgets, &editors_for_callback);
+            update_current_track_stats(&state, &editors_for_callback);
         });
     }
     {
+        let state = state.clone();
         let editors_for_signal = editors.clone();
         let editors_for_callback = editors.clone();
         let widgets = widgets.clone();
         editors_for_signal.raw_buffer.connect_changed(move |_| {
             update_editor_stats(&widgets, &editors_for_callback);
+            update_current_track_stats(&state, &editors_for_callback);
         });
     }
 }
 
 fn update_editor_stats(widgets: &EditorStatsWidgets, editors: &EditorPanes) {
-    let final_stats = editor_text_stats(&editors.final_text());
-    let raw_stats = editor_text_stats(&editors.raw_text());
-    widgets
-        .lines
-        .set_markup(&editor_stat_markup("L", final_stats.lines, raw_stats.lines));
-    widgets
-        .words
-        .set_markup(&editor_stat_markup("W", final_stats.words, raw_stats.words));
-    widgets
-        .chars
-        .set_markup(&editor_stat_markup("C", final_stats.chars, raw_stats.chars));
+    update_editor_stats_widgets(widgets, pane_text_stats(&editors.raw_text(), &editors.final_text()));
 }
 
 fn editor_text_stats(text: &str) -> EditorTextStats {
@@ -2694,33 +2819,96 @@ fn editor_word_count(text: &str) -> usize {
     words
 }
 
-fn editor_stat_markup(label: &str, final_count: usize, raw_count: usize) -> String {
-    format!(
-        "<span foreground=\"#92d9d4\" weight=\"700\">{label} {final_count}</span><span foreground=\"{}\" weight=\"700\">/{raw_count}</span>",
-        raw_count_color(final_count, raw_count)
-    )
-}
-
-fn raw_count_color(final_count: usize, raw_count: usize) -> String {
-    let pressure = raw_overrun_pressure(final_count, raw_count);
-    let start = (0x87_u8, 0xce_u8, 0x8d_u8);
-    let end = (0xf0_u8, 0x5d_u8, 0x67_u8);
-    format!(
-        "#{:02x}{:02x}{:02x}",
-        mix_channel(start.0, end.0, pressure),
-        mix_channel(start.1, end.1, pressure),
-        mix_channel(start.2, end.2, pressure)
-    )
-}
-
-fn raw_overrun_pressure(final_count: usize, raw_count: usize) -> f64 {
-    if final_count <= raw_count {
-        0.0
-    } else if raw_count == 0 {
-        1.0
-    } else {
-        ((final_count - raw_count) as f64 / raw_count as f64).clamp(0.0, 1.0)
+fn pane_text_stats(raw_text: &str, final_text: &str) -> PaneTextStats {
+    PaneTextStats {
+        raw: editor_text_stats(raw_text),
+        final_pane: editor_text_stats(final_text),
     }
+}
+
+fn text_stats_from_path(path: &PathBuf) -> EditorTextStats {
+    fs::read_to_string(path)
+        .map(|text| editor_text_stats(&text))
+        .unwrap_or_default()
+}
+
+fn track_text_stats(paths: &TrackPaths) -> PaneTextStats {
+    PaneTextStats {
+        raw: text_stats_from_path(&paths.raw_path),
+        final_pane: text_stats_from_path(&paths.final_path),
+    }
+}
+
+fn resolved_track_row_stats(
+    row_track_id: &str,
+    current_track_id: Option<&str>,
+    current_texts: Option<(&str, &str)>,
+    saved_stats: PaneTextStats,
+) -> PaneTextStats {
+    if current_track_id.is_some_and(|current| current == row_track_id) {
+        if let Some((raw_text, final_text)) = current_texts {
+            return pane_text_stats(raw_text, final_text);
+        }
+    }
+    saved_stats
+}
+
+fn track_row_stats(
+    item: &TrackListItem,
+    state: &Rc<RefCell<MainState>>,
+    editors: &Rc<EditorPanes>,
+) -> PaneTextStats {
+    let saved_stats = track_text_stats(&item.paths);
+    let current_track_id = state
+        .borrow()
+        .current
+        .as_ref()
+        .map(|open| open.settings.id.clone());
+    let raw_text = editors.raw_text();
+    let final_text = editors.final_text();
+    resolved_track_row_stats(
+        &item.settings.id,
+        current_track_id.as_deref(),
+        Some((&raw_text, &final_text)),
+        saved_stats,
+    )
+}
+
+fn update_split_stat_bubble(widgets: &SplitStatBubbleWidgets, label: &str, raw_count: usize, final_count: usize) {
+    widgets.raw.set_label(&split_stat_text(label, raw_count));
+    widgets
+        .final_pane
+        .set_label(&split_stat_text(label, final_count));
+}
+
+fn split_stat_text(label: &str, count: usize) -> String {
+    format!("{label} {count}")
+}
+
+fn update_editor_stats_widgets(widgets: &EditorStatsWidgets, stats: PaneTextStats) {
+    update_split_stat_bubble(&widgets.lines, "L", stats.raw.lines, stats.final_pane.lines);
+    update_split_stat_bubble(&widgets.words, "W", stats.raw.words, stats.final_pane.words);
+    update_split_stat_bubble(&widgets.chars, "C", stats.raw.chars, stats.final_pane.chars);
+}
+
+fn update_track_stats_widgets(widgets: &TrackStatsWidgets, stats: PaneTextStats) {
+    update_split_stat_bubble(&widgets.lines, "L", stats.raw.lines, stats.final_pane.lines);
+    update_split_stat_bubble(&widgets.words, "W", stats.raw.words, stats.final_pane.words);
+    update_split_stat_bubble(&widgets.chars, "C", stats.raw.chars, stats.final_pane.chars);
+}
+
+fn update_current_track_stats(state: &Rc<RefCell<MainState>>, editors: &EditorPanes) {
+    let widgets = {
+        let state_ref = state.borrow();
+        let Some(open) = &state_ref.current else {
+            return;
+        };
+        state_ref.track_stats_widgets.get(&open.settings.id).cloned()
+    };
+    let Some(widgets) = widgets else {
+        return;
+    };
+    update_track_stats_widgets(&widgets, pane_text_stats(&editors.raw_text(), &editors.final_text()));
 }
 
 fn structure_tool_widgets() -> StructureToolWidgets {
@@ -2917,12 +3105,23 @@ fn normalized_structure_label(label: &str) -> String {
 }
 
 fn insert_structure_tag_at_cursor(buffer: &gtk::TextBuffer, tag: &str) {
-    buffer.insert_at_cursor(&format!("{tag}\n"));
-}
+    let cursor = buffer.cursor_position().max(0) as usize;
+    let text = buffer_text(buffer);
+    let before: String = text.chars().take(cursor).collect();
+    let after: String = text.chars().skip(cursor).collect();
 
-fn mix_channel(start: u8, end: u8, amount: f64) -> u8 {
-    let amount = amount.clamp(0.0, 1.0);
-    (start as f64 + (end as f64 - start as f64) * amount).round() as u8
+    let mut insertion = String::new();
+    if !before.is_empty() && !before.ends_with('\n') {
+        insertion.push('\n');
+    }
+    insertion.push_str(tag);
+    insertion.push('\n');
+    if !after.is_empty() && !after.starts_with('\n') {
+        insertion.push('\n');
+    }
+
+    let mut iter = buffer.iter_at_offset(cursor as i32);
+    buffer.insert(&mut iter, &insertion);
 }
 
 fn set_workspace_mode(
@@ -5092,9 +5291,13 @@ fn paste_plain_text(view: &gtk::TextView) {
         }
 
         let buffer = view.buffer();
+        let mut insertion = text.to_string();
+        if !insertion.ends_with('\n') {
+            insertion.push('\n');
+        }
         buffer.begin_user_action();
         buffer.delete_selection(true, view.is_editable());
-        buffer.insert_interactive_at_cursor(text.as_str(), view.is_editable());
+        buffer.insert_interactive_at_cursor(insertion.as_str(), view.is_editable());
         buffer.end_user_action();
     });
 }
@@ -5629,28 +5832,65 @@ mod tests {
     }
 
     #[test]
-    fn raw_count_pressure_only_rises_when_final_exceeds_raw() {
-        assert_eq!(raw_overrun_pressure(3, 5), 0.0);
-        assert_eq!(raw_overrun_pressure(5, 5), 0.0);
-        assert_eq!(raw_overrun_pressure(6, 3), 1.0);
-        assert_eq!(raw_overrun_pressure(1, 0), 1.0);
+    fn pane_text_stats_count_raw_and_final_independently() {
+        assert_eq!(
+            pane_text_stats("raw line\nraw two", "final line"),
+            PaneTextStats {
+                raw: EditorTextStats {
+                    lines: 2,
+                    words: 4,
+                    chars: 16,
+                },
+                final_pane: EditorTextStats {
+                    lines: 1,
+                    words: 2,
+                    chars: 10,
+                },
+            }
+        );
     }
 
     #[test]
-    fn raw_count_color_shifts_from_green_toward_red() {
-        assert_eq!(raw_count_color(2, 4), "#87ce8d");
-        assert_eq!(raw_count_color(8, 4), "#f05d67");
-        assert_ne!(raw_count_color(5, 4), raw_count_color(2, 4));
+    fn current_track_row_stats_prefer_live_editor_buffers() {
+        let saved = PaneTextStats {
+            raw: EditorTextStats {
+                lines: 1,
+                words: 1,
+                chars: 3,
+            },
+            final_pane: EditorTextStats {
+                lines: 1,
+                words: 1,
+                chars: 5,
+            },
+        };
+
+        assert_eq!(
+            resolved_track_row_stats(
+                "track-1",
+                Some("track-1"),
+                Some(("a b\nc", "alpha beta gamma")),
+                saved,
+            ),
+            PaneTextStats {
+                raw: EditorTextStats {
+                    lines: 2,
+                    words: 3,
+                    chars: 5,
+                },
+                final_pane: EditorTextStats {
+                    lines: 1,
+                    words: 3,
+                    chars: 16,
+                },
+            }
+        );
     }
 
     #[test]
-    fn editor_stat_markup_uses_turquoise_final_and_dynamic_raw_color() {
-        let markup = editor_stat_markup("L", 5, 4);
-
-        assert!(markup.contains("#92d9d4"));
-        assert!(markup.contains("L 5"));
-        assert!(markup.contains("/4"));
-        assert!(markup.contains(&raw_count_color(5, 4)));
+    fn split_stat_text_keeps_metric_visible() {
+        assert_eq!(split_stat_text("L", 12), "L 12");
+        assert_eq!(split_stat_text("W", 0), "W 0");
     }
 
     #[test]

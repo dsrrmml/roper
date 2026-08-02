@@ -820,6 +820,10 @@ textview {
   margin-top: 4px;
 }
 
+.track-stat-bubble {
+  background: transparent;
+}
+
 .artist-stats-bubbles {
   background: transparent;
   margin-top: 4px;
@@ -938,12 +942,33 @@ textview {
 }
 
 .editor-stat-bubble {
-  background: rgba(12, 18, 22, 0.66);
+  background: transparent;
+}
+
+.stat-bubble-segment {
+  border: none;
   border-radius: 0;
+  color: #ffffff;
+  font-weight: 700;
+}
+
+.stat-bubble-raw {
+  background: #d97a18;
+}
+
+.stat-bubble-final {
+  background: #5b6a7e;
+}
+
+.editor-stat-segment {
   min-height: 36px;
   padding: 0 8px;
   font-size: 10pt;
-  font-weight: 700;
+}
+
+.track-stat-segment {
+  padding: 2px 8px;
+  font-size: 9pt;
 }
 
 .structure-tool-toggle {
