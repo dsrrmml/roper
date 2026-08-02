@@ -119,7 +119,7 @@ The Debian package installs application files to:
 
 ## Local data and logs
 
-ROPER now keeps all of its writable local files under a single application root:
+ROPER keeps all of its writable local files under a single application root:
 
 - App storage root: `~/.local/share/roper`
 - Log file: `~/.local/share/roper/roper.log`
