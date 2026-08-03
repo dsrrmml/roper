@@ -49,7 +49,6 @@ const PLACEHOLDER_ARTIST_ID: &str = "no-artist-selected";
 const TRACK_LIST_THUMBNAIL_SIZE: i32 = LIST_IMAGE_COLUMN_WIDTH;
 const ROW_ACTION_BUTTON_SIZE: i32 = TRACK_ROW_HEIGHT / 2;
 const STRUCTURE_BUBBLE_MIN_WIDTH: i32 = 10;
-const STRUCTURE_BUBBLE_MAX_WIDTH: i32 = 81;
 const STRUCTURE_BUBBLE_HEIGHT: i32 = 10;
 const EDITOR_TOOLBAR_MARGIN: i32 = 0;
 const EDITOR_TOOLBAR_FALLBACK_HEIGHT: i32 = 36;
@@ -800,6 +799,9 @@ fn wire_callbacks(
         let overlay_for_callback = overlay.clone();
         let notice = notice.clone();
         let window = window.clone();
+        let casing_button_for_form = casing_button.clone();
+        let artwork_for_form = artwork.clone();
+        let track_name_label_for_form = track_name_label.clone();
         overlay_for_signal
             .create_artist_button
             .connect_clicked(move |_| {
@@ -810,6 +812,9 @@ fn wire_callbacks(
                     &overlay_for_callback,
                     &notice,
                     None,
+                    &casing_button_for_form,
+                    &artwork_for_form,
+                    &track_name_label_for_form,
                 );
             });
     }
@@ -870,10 +875,22 @@ fn wire_callbacks(
         let overlay_for_callback = overlay.clone();
         let notice = notice.clone();
         let window = window.clone();
+        let casing_button_for_artists = casing_button.clone();
+        let artwork_for_artists = artwork.clone();
+        let track_name_label_for_artists = track_name_label.clone();
         overlay_for_signal
             .artists_tab_button
             .connect_clicked(move |_| {
-                show_artists_tab(&window, &state, &editors, &overlay_for_callback, &notice);
+                show_artists_tab(
+                    &window,
+                    &state,
+                    &editors,
+                    &overlay_for_callback,
+                    &notice,
+                    &casing_button_for_artists,
+                    &artwork_for_artists,
+                    &track_name_label_for_artists,
+                );
             });
     }
 
@@ -1895,10 +1912,6 @@ fn row_action_stack(edit: gtk::Button, remove: gtk::Button, row_height: i32) -> 
     stack.append(&edit);
     stack.append(&remove);
     stack
-}
-
-fn track_row_content_height(row_height: i32) -> i32 {
-    row_height.max(0)
 }
 
 fn track_structure_bubbles(paths: &TrackPaths) -> gtk::Box {
@@ -3276,6 +3289,9 @@ fn show_artists_tab(
     editors: &Rc<EditorPanes>,
     overlay: &Rc<TrackOverlay>,
     notice: &gtk::Label,
+    casing_button: &gtk::Button,
+    artwork: &gtk::Picture,
+    track_name_label: &gtk::Label,
 ) {
     overlay.show(window.width());
     overlay.select_tab(OverlayTab::Artists);
@@ -3316,6 +3332,9 @@ fn show_artists_tab(
                     editors,
                     overlay,
                     notice,
+                    casing_button,
+                    artwork,
+                    track_name_label,
                     artist,
                     track_count,
                 ));
@@ -3330,12 +3349,43 @@ fn show_artists_tab(
     }
 }
 
+fn select_artist_and_show_tracks(
+    state: &Rc<RefCell<MainState>>,
+    editors: &Rc<EditorPanes>,
+    overlay: &Rc<TrackOverlay>,
+    notice: &gtk::Label,
+    window: &gtk::ApplicationWindow,
+    casing_button: &gtk::Button,
+    artwork: &gtk::Picture,
+    track_name_label: &gtk::Label,
+    artist: Artist,
+) {
+    flush_current(state, editors, notice);
+    {
+        let mut state_ref = state.borrow_mut();
+        state_ref.artist = artist;
+    }
+    open_track_overlay(
+        state,
+        editors,
+        overlay,
+        notice,
+        window,
+        casing_button,
+        artwork,
+        track_name_label,
+    );
+}
+
 fn artist_menu_row(
     window: &gtk::ApplicationWindow,
     state: &Rc<RefCell<MainState>>,
     editors: &Rc<EditorPanes>,
     overlay: &Rc<TrackOverlay>,
     notice: &gtk::Label,
+    casing_button: &gtk::Button,
+    artwork: &gtk::Picture,
+    track_name_label: &gtk::Label,
     artist: Artist,
     track_count: usize,
 ) -> gtk::ListBoxRow {
@@ -3385,11 +3435,24 @@ fn artist_menu_row(
         let window = window.clone();
         let state = state.clone();
         let editors = editors.clone();
+        let overlay = overlay.clone();
         let notice = notice.clone();
+        let casing_button = casing_button.clone();
+        let artwork = artwork.clone();
+        let track_name_label = track_name_label.clone();
         let artist = artist.clone();
         open_button.connect_clicked(move |_| {
-            flush_current(&state, &editors, &notice);
-            show_in_window(&window, artist.clone());
+            select_artist_and_show_tracks(
+                &state,
+                &editors,
+                &overlay,
+                &notice,
+                &window,
+                &casing_button,
+                &artwork,
+                &track_name_label,
+                artist.clone(),
+            );
         });
     }
 
@@ -3406,6 +3469,9 @@ fn artist_menu_row(
         let editors = editors.clone();
         let overlay = overlay.clone();
         let notice = notice.clone();
+        let casing_button = casing_button.clone();
+        let artwork = artwork.clone();
+        let track_name_label = track_name_label.clone();
         let artist = artist.clone();
         edit.connect_clicked(move |_| {
             show_artist_form(
@@ -3415,6 +3481,9 @@ fn artist_menu_row(
                 &overlay,
                 &notice,
                 Some(artist.clone()),
+                &casing_button,
+                &artwork,
+                &track_name_label,
             );
         });
     }
@@ -3431,9 +3500,22 @@ fn artist_menu_row(
         let editors = editors.clone();
         let overlay = overlay.clone();
         let notice = notice.clone();
+        let casing_button = casing_button.clone();
+        let artwork = artwork.clone();
+        let track_name_label = track_name_label.clone();
         let artist = artist.clone();
         remove.connect_clicked(move |_| {
-            request_remove_artist(&window, &state, &editors, &overlay, &notice, artist.clone());
+            request_remove_artist(
+                &window,
+                &state,
+                &editors,
+                &overlay,
+                &notice,
+                &casing_button,
+                &artwork,
+                &track_name_label,
+                artist.clone(),
+            );
         });
     }
 
@@ -3603,6 +3685,9 @@ fn request_remove_artist(
     editors: &Rc<EditorPanes>,
     overlay: &Rc<TrackOverlay>,
     notice: &gtk::Label,
+    casing_button: &gtk::Button,
+    artwork: &gtk::Picture,
+    track_name_label: &gtk::Label,
     artist: Artist,
 ) {
     let message = format!("Remove artist \"{}\" from the catalog?", artist.name);
@@ -3612,6 +3697,9 @@ fn request_remove_artist(
     let editors = editors.clone();
     let overlay = overlay.clone();
     let notice = notice.clone();
+    let casing_button_for_remove = casing_button.clone();
+    let artwork_for_remove = artwork.clone();
+    let track_name_label_for_remove = track_name_label.clone();
     confirm::confirm_remove(&window_for_confirm, "Remove Artist", &message, move || {
         flush_current(&state, &editors, &notice);
         let store = match ArtistStore::new_default() {
@@ -3627,7 +3715,16 @@ fn request_remove_artist(
                 if state.borrow().artist.id == artist.id {
                     show_in_window(&window, startup_artist());
                 } else {
-                    show_artists_tab(&window, &state, &editors, &overlay, &notice);
+                    show_artists_tab(
+                        &window,
+                        &state,
+                        &editors,
+                        &overlay,
+                        &notice,
+                        &casing_button_for_remove,
+                        &artwork_for_remove,
+                        &track_name_label_for_remove,
+                    );
                 }
             }
             Err(err) => notifications::show_error(&notice, err.to_string()),
@@ -3642,6 +3739,9 @@ fn show_artist_form(
     overlay: &Rc<TrackOverlay>,
     notice: &gtk::Label,
     artist: Option<Artist>,
+    casing_button: &gtk::Button,
+    artwork: &gtk::Picture,
+    track_name_label: &gtk::Label,
 ) {
     let is_edit = artist.is_some();
     overlay.clear_edit();
@@ -3814,6 +3914,9 @@ fn show_artist_form(
         let image_source = image_source.clone();
         let error = error.clone();
         let artist = artist.clone();
+        let casing_button_for_save = casing_button.clone();
+        let artwork_for_save = artwork.clone();
+        let track_name_label_for_save = track_name_label.clone();
         save.connect_clicked(move |_| {
             let store = match ArtistStore::new_default() {
                 Ok(store) => store,
@@ -3849,7 +3952,16 @@ fn show_artist_form(
                     if should_open_saved {
                         show_in_window(&window, saved_artist);
                     } else {
-                        show_artists_tab(&window, &state, &editors, &overlay, &notice);
+                        show_artists_tab(
+                            &window,
+                            &state,
+                            &editors,
+                            &overlay,
+                            &notice,
+                            &casing_button_for_save,
+                            &artwork_for_save,
+                            &track_name_label_for_save,
+                        );
                     }
                 }
                 Err(err) => notifications::show_error(&error, err.to_string()),
