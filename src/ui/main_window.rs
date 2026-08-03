@@ -2152,6 +2152,7 @@ fn set_open_track(
     update_casing_button(state, casing_button);
     update_artwork(state, artwork);
     update_track_name_label(state, track_name_label);
+    update_track_menu_state(state, overlay);
     rebuild_material_ui(state, editors, overlay, notice);
     notifications::clear(notice);
 }
@@ -3737,7 +3738,31 @@ fn resolve_initial_artist(artist: Artist, app_settings: &AppSettings) -> Artist 
 }
 
 fn update_track_menu_state(state: &Rc<RefCell<MainState>>, overlay: &Rc<TrackOverlay>) {
-    let artist_selected = !is_placeholder_artist(&state.borrow().artist);
+    let state_ref = state.borrow();
+    let artist_selected = !is_placeholder_artist(&state_ref.artist);
+    let artist_name = state_ref.artist.name.trim();
+    let track_name = state_ref
+        .current
+        .as_ref()
+        .map(|open| open.settings.name.trim())
+        .filter(|name| !name.is_empty());
+
+    if artist_selected && !artist_name.is_empty() {
+        overlay
+            .artists_tab_label
+            .set_text(&format!("ARTISTS {artist_name}"));
+    } else {
+        overlay.artists_tab_label.set_text("ARTISTS");
+    }
+
+    if let Some(track_name) = track_name {
+        overlay
+            .tracks_tab_label
+            .set_text(&format!("TRACKS {track_name}"));
+    } else {
+        overlay.tracks_tab_label.set_text("TRACKS");
+    }
+
     overlay.tracks_tab_button.set_sensitive(artist_selected);
     overlay.create_button.set_sensitive(artist_selected);
 }

@@ -37,6 +37,8 @@ pub struct TrackOverlay {
     pub create_artist_button: gtk::Button,
     pub artists_tab_button: gtk::Button,
     pub tracks_tab_button: gtk::Button,
+    pub artists_tab_label: gtk::Label,
+    pub tracks_tab_label: gtk::Label,
     pub ideas_tab_button: gtk::Button,
     pub settings_tab_button: gtk::Button,
     pub info_tab_button: gtk::Button,
@@ -96,12 +98,12 @@ impl TrackOverlay {
 
         let tab_bar = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         tab_bar.add_css_class("menu-tabs");
-        let artists_tab_button = tab_button("artist.svg", "ARTISTS");
-        let tracks_tab_button = tab_button("lyrics.svg", "TRACKS");
-        let ideas_tab_button = tab_button("lightbulb.svg", "IDEAS");
-        let settings_tab_button = tab_button("tab-settings.svg", "SETTINGS");
-        let info_tab_button = tab_button("info.svg", "INFO");
-        let exit_tab_button = tab_button("exit.svg", "EXIT");
+        let (artists_tab_button, artists_tab_label) = tab_button("artist.svg", "ARTISTS");
+        let (tracks_tab_button, tracks_tab_label) = tab_button("lyrics.svg", "TRACKS");
+        let (ideas_tab_button, _) = tab_button("lightbulb.svg", "IDEAS");
+        let (settings_tab_button, _) = tab_button("tab-settings.svg", "SETTINGS");
+        let (info_tab_button, _) = tab_button("info.svg", "INFO");
+        let (exit_tab_button, _) = tab_button("exit.svg", "EXIT");
         let tab_action_spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         tab_action_spacer.set_hexpand(true);
         let tab_action_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -189,6 +191,8 @@ impl TrackOverlay {
             create_artist_button,
             artists_tab_button,
             tracks_tab_button,
+            artists_tab_label,
+            tracks_tab_label,
             ideas_tab_button,
             settings_tab_button,
             info_tab_button,
@@ -325,7 +329,7 @@ fn menu_page() -> gtk::Box {
     page
 }
 
-fn tab_button(icon_name: &str, label: &str) -> gtk::Button {
+fn tab_button(icon_name: &str, label: &str) -> (gtk::Button, gtk::Label) {
     let button = gtk::Button::new();
     button.add_css_class("menu-tab-button");
     let content = gtk::Box::new(gtk::Orientation::Horizontal, 6);
@@ -335,7 +339,7 @@ fn tab_button(icon_name: &str, label: &str) -> gtk::Button {
     label_widget.set_xalign(0.0);
     content.append(&label_widget);
     button.set_child(Some(&content));
-    button
+    (button, label_widget)
 }
 
 fn clear_box(box_: &gtk::Box) {
