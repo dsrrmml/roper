@@ -264,11 +264,19 @@ impl TrackStore {
         self.save_settings(paths, settings)
     }
 
+    pub fn latest_opened_track(&self) -> AppResult<Option<TrackListItem>> {
+        self.latest_opened_track_filtered(None)
+    }
+
     pub fn latest_opened_track_for_artist(
         &self,
         artist_id: &str,
     ) -> AppResult<Option<TrackListItem>> {
         validate_id(artist_id)?;
+        self.latest_opened_track_filtered(Some(artist_id))
+    }
+
+    fn latest_opened_track_filtered(&self, artist_id: Option<&str>) -> AppResult<Option<TrackListItem>> {
         let ids = self.existing_track_ids()?;
         let mut latest: Option<TrackListItem> = None;
         for id in ids {
@@ -276,8 +284,10 @@ impl TrackStore {
             let Ok(settings) = self.load_settings(&paths) else {
                 continue;
             };
-            if settings.artist_id != artist_id {
-                continue;
+            if let Some(artist_id) = artist_id {
+                if settings.artist_id != artist_id {
+                    continue;
+                }
             }
             let item = TrackListItem { settings, paths };
             let replace = latest
@@ -600,6 +610,40 @@ mod tests {
                 .all(|item| !first_ids.contains(&item.settings.id))
         );
         assert!(pager.is_exhausted());
+    }
+
+    #[test]
+    fn latest_opened_track_returns_the_most_recently_opened_track_globally() {
+        let dir = tempdir().expect("temp dir can be created");
+        let store = TrackStore::new(dir.path().to_path_buf());
+        let mut latest_id = String::new();
+
+        for (index, artist_id) in ["abcdef123456", "fedcba654321"].into_iter().enumerate() {
+            let working_directory =
+                create_existing_working_directory(dir.path(), &format!("track-global-{index}"));
+            let (mut settings, paths) = store
+                .create_track(TrackDraft {
+                    id: None,
+                    artist_id: artist_id.to_owned(),
+                    name: format!("Track {index}"),
+                    tempo: 90,
+                    length: "03:42".to_owned(),
+                    working_directory: Some(working_directory),
+                    artwork_source: None,
+                })
+                .expect("track can be created");
+            settings.last_opened_unix = Some(index as u64 + 10);
+            latest_id = settings.id.clone();
+            store
+                .save_settings(&paths, &settings)
+                .expect("settings can be saved");
+        }
+
+        let latest = store
+            .latest_opened_track()
+            .expect("latest track lookup works")
+            .expect("latest track exists");
+        assert_eq!(latest.settings.id, latest_id);
     }
 
     #[test]

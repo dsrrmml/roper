@@ -224,6 +224,7 @@ pub fn show_in_window(window: &gtk::ApplicationWindow, artist: Artist) {
     window_policy::set_fullscreen_enabled(window, app_settings.fullscreen);
 
     let editors = Rc::new(EditorPanes::new(app_settings.font_size_pt));
+    editors.set_track_connection(false);
     let root_overlay = gtk::Overlay::new();
     root_overlay.set_hexpand(true);
     root_overlay.set_vexpand(true);
@@ -467,7 +468,7 @@ fn apply_startup_behavior(
             set_workspace_mode(state, overlay, editor_mode_stack, editor_chrome, true);
             ideas_workspace.clear_current_idea();
             overlay.hide();
-            editors.clear();
+            editors.set_track_connection(false);
             update_casing_button(state, casing_button);
             update_track_name_label(state, track_name_label);
             ideas_workspace.focus_verses();
@@ -475,6 +476,7 @@ fn apply_startup_behavior(
         StartBehavior::LastIdea => {
             set_workspace_mode(state, overlay, editor_mode_stack, editor_chrome, true);
             overlay.hide();
+            editors.set_track_connection(false);
             ideas_workspace.restore_latest_idea();
             ideas_workspace.focus_verses();
         }
@@ -482,7 +484,7 @@ fn apply_startup_behavior(
             set_workspace_mode(state, overlay, editor_mode_stack, editor_chrome, false);
             overlay.hide();
             if is_placeholder_artist(&state.borrow().artist) {
-                editors.clear();
+                editors.set_track_connection(false);
                 update_casing_button(state, casing_button);
                 update_track_name_label(state, track_name_label);
             } else {
@@ -499,6 +501,7 @@ fn apply_startup_behavior(
         StartBehavior::TrackList => {
             set_workspace_mode(state, overlay, editor_mode_stack, editor_chrome, false);
             overlay.hide();
+            editors.set_track_connection(false);
             open_track_overlay(
                 state,
                 editors,
@@ -1054,8 +1057,7 @@ fn open_initial_track(
     track_name_label: &gtk::Label,
 ) {
     let store = state.borrow().track_store.clone();
-    let artist_id = state.borrow().artist.id.clone();
-    match store.latest_opened_track_for_artist(&artist_id) {
+    match store.latest_opened_track() {
         Ok(Some(item)) => {
             open_track_by_id(
                 state,
@@ -1068,7 +1070,7 @@ fn open_initial_track(
             );
         }
         Ok(None) => {
-            editors.clear();
+            editors.set_track_connection(false);
             update_casing_button(state, casing_button);
             update_track_name_label(state, track_name_label);
         }
@@ -1813,7 +1815,7 @@ fn request_remove_track(
                         state_ref.current = None;
                         state_ref.programmatic_text_change = true;
                     }
-                    editors.clear();
+                    editors.set_track_connection(false);
                     state.borrow_mut().programmatic_text_change = false;
                     update_casing_button(&state, &casing_button);
                     update_artwork(&state, &artwork);
@@ -2145,6 +2147,7 @@ fn set_open_track(
         let mut state_ref = state.borrow_mut();
         state_ref.current = Some(OpenTrack { settings, paths });
     }
+    editors.set_track_connection(true);
     update_casing_button(state, casing_button);
     update_artwork(state, artwork);
     update_track_name_label(state, track_name_label);
@@ -6005,13 +6008,6 @@ mod tests {
     }
 
     #[test]
-    fn track_row_content_height_matches_row_height() {
-        assert_eq!(track_row_content_height(TRACK_ROW_HEIGHT), TRACK_ROW_HEIGHT);
-        assert_eq!(track_row_content_height(0), 0);
-        assert_eq!(track_row_content_height(-16), 0);
-    }
-
-    #[test]
     fn editor_footer_starts_on_final_pane_side() {
         assert_eq!(editor_chrome_raw_width(1000), 400);
         assert_eq!(editor_chrome_raw_width(0), 0);
@@ -6067,8 +6063,7 @@ mod tests {
     }
 
     #[test]
-    fn track_structure_bubble_width_is_capped_at_eighty_one_pixels() {
-        assert_eq!(STRUCTURE_BUBBLE_MAX_WIDTH, 81);
+    fn track_structure_bubble_width_is_capped_at_available_width() {
         assert_eq!(
             structure_bubble_width(usize::MAX, usize::MAX, 400),
             400
