@@ -166,6 +166,7 @@ struct MainState {
     loading_page: bool,
     search_marker_layer: Option<gtk::DrawingArea>,
     track_stats_widgets: HashMap<String, TrackStatsWidgets>,
+    structure_tool_widgets: Option<StructureToolWidgets>,
     ideas_mode_active: bool,
 }
 
@@ -214,6 +215,7 @@ pub fn show_in_window(window: &gtk::ApplicationWindow, artist: Artist) {
         loading_page: false,
         search_marker_layer: None,
         track_stats_widgets: HashMap::new(),
+        structure_tool_widgets: None,
         ideas_mode_active: startup_uses_ideas_workspace(app_settings.start_behavior),
     }));
 
@@ -309,6 +311,7 @@ pub fn show_in_window(window: &gtk::ApplicationWindow, artist: Artist) {
     structure_button.set_halign(gtk::Align::End);
     structure_button.set_child(Some(&icon_image_with_size("structure.svg", "", 18)));
     let structure_tool = structure_tool_widgets();
+    let structure_tool_for_state = structure_tool.clone();
     let lower_left_controls = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     lower_left_controls.add_css_class("editor-footer-controls");
     lower_left_controls.set_halign(gtk::Align::Start);
@@ -431,6 +434,7 @@ pub fn show_in_window(window: &gtk::ApplicationWindow, artist: Artist) {
     wire_editor_stats(&state, &editors, &editor_stats);
     update_editor_stats(&editor_stats, &editors);
     wire_structure_tool(&editors, &structure_button, &structure_tool);
+    state.borrow_mut().structure_tool_widgets = Some(structure_tool_for_state);
 
     window.present();
     window_policy::reassert_fullscreen(window);
@@ -2129,6 +2133,9 @@ fn set_open_track(
 
     let cased_final = apply_casing(&final_text, settings.casing_mode);
     editors.set_texts(&cased_final, &raw_text);
+    if let Some(widgets) = state.borrow().structure_tool_widgets.clone() {
+        update_structure_tool_labels(&widgets, &editors.final_text());
+    }
     {
         let mut state_ref = state.borrow_mut();
         state_ref.programmatic_text_change = false;
