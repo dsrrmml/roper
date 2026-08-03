@@ -159,6 +159,10 @@ impl EditorPanes {
         final_gutter.set_size_request(NUMBER_LANE_WIDTH, -1);
         final_gutter.set_halign(gtk::Align::Start);
         final_gutter.set_valign(gtk::Align::Fill);
+        // Ensure the gutter sits flush with the pane border and top
+        final_gutter.set_margin_start(0);
+        final_gutter.set_margin_top(0);
+        final_gutter.set_margin_end(0);
         final_gutter.set_hexpand(false);
         final_gutter.set_vexpand(true);
         crate::ui::raw_gutter::install_line_number_gutter(&final_gutter, &final_view);
