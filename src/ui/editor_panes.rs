@@ -404,6 +404,24 @@ impl EditorPanes {
         self.set_texts("", "");
     }
 
+    pub fn set_track_connection(&self, connected: bool) {
+        let (root_sensitive, view_sensitive, editable, can_focus, cursor_visible) =
+            track_connection_state(connected);
+        self.root.set_sensitive(root_sensitive);
+        self.final_view.set_sensitive(view_sensitive);
+        self.raw_view.set_sensitive(view_sensitive);
+        self.final_view.set_editable(editable);
+        self.raw_view.set_editable(editable);
+        self.final_view.set_can_focus(can_focus);
+        self.raw_view.set_can_focus(can_focus);
+        self.final_view.set_cursor_visible(cursor_visible);
+        self.raw_view.set_cursor_visible(cursor_visible);
+
+        if !connected {
+            self.clear();
+        }
+    }
+
     pub fn final_text(&self) -> String {
         buffer_text(&self.final_buffer)
     }
@@ -429,6 +447,39 @@ pub fn buffer_text(buffer: &gtk::TextBuffer) -> String {
     buffer
         .text(&buffer.start_iter(), &buffer.end_iter(), true)
         .to_string()
+}
+
+fn track_connection_state(connected: bool) -> (bool, bool, bool, bool, bool) {
+    (connected, connected, connected, connected, connected)
+}
+
+#[cfg(test)]
+mod editor_panes_tests {
+    use super::*;
+
+    #[test]
+    fn track_connection_disables_editors_when_no_track_is_active() {
+        let (root_sensitive, view_sensitive, editable, can_focus, cursor_visible) =
+            track_connection_state(false);
+
+        assert!(!root_sensitive);
+        assert!(!view_sensitive);
+        assert!(!editable);
+        assert!(!can_focus);
+        assert!(!cursor_visible);
+    }
+
+    #[test]
+    fn track_connection_enables_editors_when_a_track_is_active() {
+        let (root_sensitive, view_sensitive, editable, can_focus, cursor_visible) =
+            track_connection_state(true);
+
+        assert!(root_sensitive);
+        assert!(view_sensitive);
+        assert!(editable);
+        assert!(can_focus);
+        assert!(cursor_visible);
+    }
 }
 
 pub fn replace_buffer_text_preserving_cursor(buffer: &gtk::TextBuffer, text: &str) {
@@ -813,7 +864,7 @@ fn install_font_css(font_size_pt: u16) {
 }
 
 #[cfg(test)]
-mod tests {
+mod editor_panes_unit_tests {
     use super::*;
 
     #[test]
