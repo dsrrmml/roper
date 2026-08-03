@@ -32,6 +32,7 @@ pub fn apply(
     final_buffer: &gtk::TextBuffer,
     final_view: &gtk::TextView,
     final_warning_layer: &gtk::DrawingArea,
+    show_empty_line_pattern: bool,
     raw_text: &str,
     final_text: &str,
 ) {
@@ -42,6 +43,7 @@ pub fn apply(
         final_warning_layer,
         final_view,
         highlights.final_.warnings.clone(),
+        show_empty_line_pattern,
     );
 }
 
@@ -196,6 +198,7 @@ fn apply_warning_layer(
     layer: &gtk::DrawingArea,
     final_view: &gtk::TextView,
     warnings: Vec<RepeatWarning>,
+    show_empty_line_pattern: bool,
 ) {
     let warnings = Rc::new(warnings);
     let final_view = final_view.clone();
@@ -210,6 +213,92 @@ fn apply_warning_layer(
         );
     });
     layer.queue_draw();
+}
+
+pub fn draw_empty_line_pattern(
+    layer: &gtk::DrawingArea,
+    final_view: &gtk::TextView,
+    cr: &gtk::cairo::Context,
+    width: f64,
+    height: f64,
+    enabled: bool,
+) {
+    if !enabled {
+        return;
+    }
+
+    let view_origin = final_view
+        .translate_coordinates(layer, 0.0, 0.0)
+        .unwrap_or((0.0, 0.0));
+    let buffer = final_view.buffer();
+    let mut iter = buffer.start_iter();
+    let mut last_text_line_bottom: Option<f64> = None;
+
+    while iter.offset() < buffer.char_count() as i32 {
+        let line_start = iter.clone();
+        let mut line_end = iter.clone();
+        line_end.forward_to_line_end();
+        let line_text = buffer.slice(&line_start, &line_end, false);
+        let is_empty_line = line_text.trim().is_empty();
+        let (line_y, line_height) = final_view.line_yrange(&line_start);
+
+        let line_top = view_origin.1 + line_y as f64;
+        let line_bottom = view_origin.1 + (line_y + line_height) as f64;
+        last_text_line_bottom = Some(line_bottom.max(last_text_line_bottom.unwrap_or(line_bottom)));
+
+        if is_empty_line {
+            let line_span = (line_bottom - line_top).max(1.0);
+            let _ = cr.save();
+            cr.rectangle(0.0, line_top, width, line_span);
+            cr.clip();
+            cr.set_source_rgba(0.72, 0.68, 0.90, 0.56);
+            cr.set_line_width(1.4);
+            let step = 8.0;
+            let diagonal = line_span * 2.4;
+            let min_x = -width;
+            let max_x = width * 2.0;
+            let mut x = min_x;
+            while x <= max_x {
+                cr.move_to(x, line_top);
+                cr.line_to(x + diagonal, line_bottom);
+                x += step;
+            }
+            cr.stroke().ok();
+            let _ = cr.restore();
+        }
+
+        if !iter.forward_line() {
+            break;
+        }
+    }
+
+    if let Some(last_bottom) = last_text_line_bottom {
+        let text_end_iter = buffer.end_iter();
+        let (_end_y, end_height) = final_view.line_yrange(&text_end_iter);
+        let empty_region_top = last_bottom;
+        if empty_region_top < height {
+            let empty_span = height - empty_region_top;
+            let _ = cr.save();
+            cr.rectangle(0.0, empty_region_top, width, empty_span);
+            cr.clip();
+            cr.set_source_rgba(0.72, 0.68, 0.90, 0.56);
+            cr.set_line_width(1.4);
+            let step = 8.0;
+            let diagonal = (end_height.max(18) as f64) * 2.4;
+            let min_x = -width;
+            let max_x = width * 2.0;
+            let mut x = min_x;
+            while x <= max_x {
+                cr.move_to(x, empty_region_top);
+                cr.line_to(x + diagonal, empty_region_top + empty_span);
+                x += step;
+            }
+            cr.stroke().ok();
+            let _ = cr.restore();
+        }
+    }
+
+    let _ = height;
 }
 
 fn draw_warning_markers(

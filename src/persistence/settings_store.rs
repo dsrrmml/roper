@@ -69,6 +69,8 @@ pub struct AppSettings {
     pub schema_version: u32,
     pub font_size_pt: u16,
     pub fullscreen: bool,
+    #[serde(default)]
+    pub empty_line_pattern: bool,
     pub default_casing_mode: CasingMode,
     #[serde(default)]
     pub start_behavior: StartBehavior,
@@ -86,6 +88,7 @@ impl Default for AppSettings {
             schema_version: 1,
             font_size_pt: DEFAULT_FONT_SIZE,
             fullscreen: true,
+            empty_line_pattern: false,
             default_casing_mode: CasingMode::Preserve,
             start_behavior: StartBehavior::default(),
             last_workspace_mode: default_workspace_mode(),

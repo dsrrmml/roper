@@ -228,6 +228,7 @@ pub fn show_in_window(window: &gtk::ApplicationWindow, artist: Artist) {
     window_policy::set_fullscreen_enabled(window, app_settings.fullscreen);
 
     let editors = Rc::new(EditorPanes::new(app_settings.font_size_pt));
+    editors.empty_line_pattern_enabled.set(app_settings.empty_line_pattern);
     editors.set_track_connection(false);
     let root_overlay = gtk::Overlay::new();
     root_overlay.set_hexpand(true);
@@ -2498,6 +2499,7 @@ fn rebuild_material_ui(
         &editors.final_buffer,
         &editors.final_view,
         &editors.final_warning_layer,
+        state.borrow().app_settings.empty_line_pattern,
         &raw_text,
         &final_text,
     );
@@ -4192,6 +4194,10 @@ fn show_settings_tab(
     let fullscreen_toggle = settings_icon_toggle_button(fullscreen_enabled);
     fullscreen_toggle.set_halign(gtk::Align::End);
 
+    let empty_line_pattern_enabled = state.borrow().app_settings.empty_line_pattern;
+    let empty_line_pattern_toggle = settings_icon_toggle_button(empty_line_pattern_enabled);
+    empty_line_pattern_toggle.set_halign(gtk::Align::End);
+
     let settings_path = {
         let state_ref = state.borrow();
         state_ref.settings_store.path().display().to_string()
@@ -4215,6 +4221,9 @@ fn show_settings_tab(
         .append(&settings_row("fullscreen", &fullscreen_toggle));
     overlay
         .settings_box
+        .append(&settings_row("empty lines pattern", &empty_line_pattern_toggle));
+    overlay
+        .settings_box
         .append(&settings_row("settings file", &settings_path_label));
 
     {
@@ -4236,6 +4245,33 @@ fn show_settings_tab(
                 }
             }
             window_policy::set_fullscreen_enabled(&window, enabled);
+        });
+    }
+
+    {
+        let state = state.clone();
+        let notice = notice.clone();
+        let overlay = overlay.clone();
+        let editors = editors.clone();
+        let empty_line_pattern_state = Rc::new(Cell::new(empty_line_pattern_enabled));
+        let empty_line_pattern_state_for_click = empty_line_pattern_state.clone();
+        let empty_line_pattern_toggle_for_click = empty_line_pattern_toggle.clone();
+        empty_line_pattern_toggle.connect_clicked(move |_| {
+            let enabled = !empty_line_pattern_state_for_click.get();
+            empty_line_pattern_state_for_click.set(enabled);
+            set_settings_toggle_icon(&empty_line_pattern_toggle_for_click, enabled);
+            {
+                let mut state_ref = state.borrow_mut();
+                state_ref.app_settings.empty_line_pattern = enabled;
+                if let Err(err) = state_ref.settings_store.save(&state_ref.app_settings) {
+                    notifications::show_error(&notice, err.to_string());
+                }
+            }
+            editors.empty_line_pattern_enabled.set(enabled);
+            editors.final_view.queue_draw();
+            editors.final_pattern_layer.queue_draw();
+            editors.final_warning_layer.queue_draw();
+            rebuild_material_ui(&state, &editors, &overlay, &notice);
         });
     }
 

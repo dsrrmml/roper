@@ -46,11 +46,13 @@ pub struct EditorPanes {
     pub raw_view: gtk::TextView,
     pub final_buffer: gtk::TextBuffer,
     pub raw_buffer: gtk::TextBuffer,
+    pub final_pattern_layer: gtk::DrawingArea,
     pub final_warning_layer: gtk::DrawingArea,
     pub final_gutter: gtk::Box,
     pub raw_gutter: gtk::Box,
     pub final_minimap: gtk::DrawingArea,
     pub raw_minimap: gtk::DrawingArea,
+    pub empty_line_pattern_enabled: Rc<Cell<bool>>,
 }
 
 impl EditorPanes {
@@ -63,8 +65,10 @@ impl EditorPanes {
         raw_buffer.set_enable_undo(true);
 
         let final_view = build_text_view(&final_buffer);
+        final_view.add_css_class("final-editor-view");
         final_view.set_left_margin(NUMBER_LANE_WIDTH);
         final_view.set_right_margin(FINAL_WARNING_MARGIN_PX);
+        let empty_line_pattern_enabled = Rc::new(Cell::new(false));
         let raw_view = build_text_view(&raw_buffer);
         raw_view.set_left_margin(EDITOR_GUTTER_WIDTH_PX);
         raw_view.set_right_margin(EDITOR_MINIMAP_MARGIN_PX);
@@ -74,12 +78,48 @@ impl EditorPanes {
             .vexpand(true)
             .child(&final_view)
             .build();
+        final_scrolled.add_css_class("final-scrolled");
 
         let raw_scrolled = gtk::ScrolledWindow::builder()
             .hexpand(true)
             .vexpand(true)
             .child(&raw_view)
             .build();
+
+        let final_pattern_layer = gtk::DrawingArea::new();
+        final_pattern_layer.add_css_class("final-pattern-layer");
+        final_pattern_layer.set_can_target(false);
+        final_pattern_layer.set_halign(gtk::Align::Fill);
+        final_pattern_layer.set_valign(gtk::Align::Fill);
+        final_pattern_layer.set_hexpand(true);
+        final_pattern_layer.set_vexpand(true);
+
+        {
+            let enabled = empty_line_pattern_enabled.clone();
+            final_pattern_layer.set_draw_func(move |_, cr, width, height| {
+                if !enabled.get() {
+                    return;
+                }
+                let width = width as f64;
+                let height = height as f64;
+                let angle = 27_f64.to_radians();
+                let slope = angle.tan();
+                let spacing = 18.0;
+                let run = height / slope;
+                let mut x = -run;
+
+                cr.set_source_rgba(1.0, 1.0, 1.0, 0.18);
+                cr.set_line_width(1.6);
+                cr.set_line_cap(gtk::cairo::LineCap::Round);
+
+                while x <= width {
+                    cr.move_to(x, 0.0);
+                    cr.line_to(x + run, height);
+                    x += spacing;
+                }
+                cr.stroke().ok();
+            });
+        }
 
         let final_warning_layer = gtk::DrawingArea::new();
         final_warning_layer.add_css_class("final-warning-layer");
@@ -91,15 +131,23 @@ impl EditorPanes {
 
         {
             let final_warning_layer = final_warning_layer.clone();
+            let final_pattern_layer = final_pattern_layer.clone();
             final_scrolled
                 .vadjustment()
-                .connect_value_changed(move |_| final_warning_layer.queue_draw());
+                .connect_value_changed(move |_| {
+                    final_warning_layer.queue_draw();
+                    final_pattern_layer.queue_draw();
+                });
         }
         {
             let final_warning_layer = final_warning_layer.clone();
+            let final_pattern_layer = final_pattern_layer.clone();
             final_scrolled
                 .hadjustment()
-                .connect_value_changed(move |_| final_warning_layer.queue_draw());
+                .connect_value_changed(move |_| {
+                    final_warning_layer.queue_draw();
+                    final_pattern_layer.queue_draw();
+                });
         }
 
         let final_gutter = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -337,7 +385,8 @@ impl EditorPanes {
         let final_overlay = gtk::Overlay::new();
         final_overlay.set_hexpand(true);
         final_overlay.set_vexpand(true);
-        final_overlay.set_child(Some(&final_scrolled));
+        final_overlay.set_child(Some(&final_pattern_layer));
+        final_overlay.add_overlay(&final_scrolled);
         final_overlay.add_overlay(&final_gutter);
         final_overlay.add_overlay(&final_minimap);
         final_overlay.add_overlay(&final_warning_layer);
@@ -364,11 +413,13 @@ impl EditorPanes {
             raw_view,
             final_buffer,
             raw_buffer,
+            final_pattern_layer,
             final_warning_layer,
             final_gutter,
             raw_gutter,
             final_minimap,
             raw_minimap,
+            empty_line_pattern_enabled,
         };
 
         refresh_editor_minimap_visibility(
