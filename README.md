@@ -180,11 +180,13 @@ Detected tags color full regions until the next tag:
 - `[INTRO]`
 - `[VERSE n]`
 - `[HOOK]` / `[HOOK n]`
+- `[BRIDGE]` / `[BRIDGE n]`
 - `[OUTRO]`
 
 Practical use:
 
 - maintain structural readability in long tracks
+- recognize doubled/stale/redundant sections 
 - reduce accidental section bleed
 
 ### 5) Minimap + section badges (for long text)
@@ -237,7 +239,7 @@ ROPER_STORAGE_DIR=/absolute/path/to/roper-data python3 scripts/populate_showcase
 
 - `Ctrl+Z`: Undo
 - `Ctrl+Shift+Z` / `Ctrl+Y`: Redo
-- `Ctrl+C`, `Ctrl+X`, `Ctrl+V`: Copy / Cut / Paste
+- `Ctrl+C`, `Ctrl+X`, `Ctrl+V`: Copy / Cut / Paste (Probably fucks up some os-intended behaviour)
 - `Ctrl+A`: Select all in active editor
 - `Ctrl+Enter`: Transfer active raw line
 - `Ctrl+F`: Search

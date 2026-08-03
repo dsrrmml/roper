@@ -1922,7 +1922,7 @@ fn row_action_stack(edit: gtk::Button, remove: gtk::Button, row_height: i32) -> 
 }
 
 fn track_structure_bubbles(paths: &TrackPaths) -> gtk::Box {
-    let bubbles = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    let bubbles = gtk::Box::new(gtk::Orientation::Horizontal, 2);
     bubbles.add_css_class("track-structure-bubbles");
     bubbles.set_size_request(-1, 14);
     bubbles.set_hexpand(true);
