@@ -8,7 +8,7 @@ use std::rc::Rc;
 
 const GUTTER_WIDTH: i32 = 36;
 const MARKER_LANE_WIDTH: f64 = 14.0;
-const NUMBER_LEFT_INSET: f64 = 3.0;
+const NUMBER_LEFT_INSET: f64 = 4.0;
 const NUMBER_RIGHT_INSET: f64 = 3.0;
 const NUMBER_FONT_MIN_PX: f64 = 9.0;
 const NUMBER_FONT_MAX_PX: f64 = 13.0;

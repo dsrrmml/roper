@@ -56,6 +56,9 @@ textview {
 
 .final-editor-view {
   background: transparent;
+  /* remove the default editor padding on the left so the gutter
+     can sit flush against the pane border; keep other paddings */
+  padding: 12px 12px 12px 0px;
 }
 
 .final-editor-view text {
