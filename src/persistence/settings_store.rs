@@ -9,12 +9,69 @@ use std::path::{Path, PathBuf};
 pub const VALID_FONT_SIZES: [u16; 5] = [10, 12, 14, 16, 18];
 pub const DEFAULT_FONT_SIZE: u16 = 16;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StartBehavior {
+    FreshIdea,
+    LastIdea,
+    LastTrack,
+    TrackList,
+}
+
+impl Default for StartBehavior {
+    fn default() -> Self {
+        Self::LastTrack
+    }
+}
+
+impl StartBehavior {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::FreshIdea => "FRESH IDEA",
+            Self::LastIdea => "LAST IDEA",
+            Self::LastTrack => "LAST TRACK",
+            Self::TrackList => "TRACK LIST",
+        }
+    }
+
+    pub fn from_label(label: &str) -> Option<Self> {
+        match label {
+            "FRESH IDEA" => Some(Self::FreshIdea),
+            "LAST IDEA" => Some(Self::LastIdea),
+            "LAST TRACK" => Some(Self::LastTrack),
+            "TRACK LIST" => Some(Self::TrackList),
+            _ => None,
+        }
+    }
+
+    pub fn combo_index(self) -> u32 {
+        match self {
+            Self::FreshIdea => 0,
+            Self::LastIdea => 1,
+            Self::LastTrack => 2,
+            Self::TrackList => 3,
+        }
+    }
+
+    pub fn from_combo_index(index: u32) -> Option<Self> {
+        match index {
+            0 => Some(Self::FreshIdea),
+            1 => Some(Self::LastIdea),
+            2 => Some(Self::LastTrack),
+            3 => Some(Self::TrackList),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct AppSettings {
     pub schema_version: u32,
     pub font_size_pt: u16,
     pub fullscreen: bool,
     pub default_casing_mode: CasingMode,
+    #[serde(default)]
+    pub start_behavior: StartBehavior,
     #[serde(default = "default_workspace_mode")]
     pub last_workspace_mode: String,
     #[serde(default)]
@@ -28,6 +85,7 @@ impl Default for AppSettings {
             font_size_pt: DEFAULT_FONT_SIZE,
             fullscreen: true,
             default_casing_mode: CasingMode::Preserve,
+            start_behavior: StartBehavior::default(),
             last_workspace_mode: default_workspace_mode(),
             last_idea_id: None,
         }
@@ -79,6 +137,9 @@ impl SettingsStore {
         if !is_valid_font_size(settings.font_size_pt) {
             settings.font_size_pt = DEFAULT_FONT_SIZE;
         }
+        if settings.start_behavior == StartBehavior::default() && settings.last_workspace_mode.is_empty() {
+            settings.start_behavior = StartBehavior::LastTrack;
+        }
         if migrate_after_load {
             self.save(&settings)?;
         }
@@ -121,6 +182,21 @@ mod tests {
         let settings = AppSettings::default();
         assert!(settings.fullscreen);
         assert_eq!(settings.font_size_pt, DEFAULT_FONT_SIZE);
+        assert_eq!(settings.start_behavior, StartBehavior::LastTrack);
+    }
+
+    #[test]
+    fn save_and_load_roundtrip_start_behavior() {
+        let dir = tempdir().expect("temp dir can be created");
+        let path = dir.path().join("settings.json");
+        let store = SettingsStore::new(path.clone());
+        let settings = AppSettings {
+            start_behavior: StartBehavior::FreshIdea,
+            ..AppSettings::default()
+        };
+        store.save(&settings).expect("settings can be saved");
+        let loaded = store.load().expect("settings can be loaded");
+        assert_eq!(loaded.start_behavior, StartBehavior::FreshIdea);
     }
 
     #[test]

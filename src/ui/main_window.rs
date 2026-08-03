@@ -3,7 +3,9 @@ use crate::app_paths;
 use crate::error_handling::AppError;
 use crate::models::{Artist, CasingMode, TrackSettings, UsedMaterial};
 use crate::persistence::artist_store::ArtistStore;
-use crate::persistence::settings_store::{AppSettings, SettingsStore, VALID_FONT_SIZES};
+use crate::persistence::settings_store::{
+    AppSettings, SettingsStore, StartBehavior, VALID_FONT_SIZES,
+};
 use crate::persistence::track_store::{
     TrackDraft, TrackListItem, TrackPager, TrackPaths, TrackStore,
 };
@@ -432,21 +434,84 @@ pub fn show_in_window(window: &gtk::ApplicationWindow, artist: Artist) {
     window_policy::reassert_fullscreen(window);
     editors.keep_ratio();
     update_editor_chrome_layout(window, &root_overlay, &editor_chrome, &editor_chrome_spacer);
-    if !is_placeholder_artist(&artist) {
-        open_initial_track(
-            &state,
-            &editors,
-            &notice,
-            &casing_button,
-            &artwork,
-            &track_name_label,
-        );
-    } else {
-        editors.clear();
-        update_casing_button(&state, &casing_button);
-        update_track_name_label(&state, &track_name_label);
+    apply_startup_behavior(
+        window,
+        &state,
+        &editors,
+        &overlay,
+        &notice,
+        &ideas_workspace,
+        &editor_mode_stack,
+        &editor_chrome,
+        &casing_button,
+        &artwork,
+        &track_name_label,
+    );
+}
+
+fn apply_startup_behavior(
+    window: &gtk::ApplicationWindow,
+    state: &Rc<RefCell<MainState>>,
+    editors: &Rc<EditorPanes>,
+    overlay: &Rc<TrackOverlay>,
+    notice: &gtk::Label,
+    ideas_workspace: &Rc<IdeasWorkspace>,
+    editor_mode_stack: &gtk::Stack,
+    editor_chrome: &gtk::Box,
+    casing_button: &gtk::Button,
+    artwork: &gtk::Picture,
+    track_name_label: &gtk::Label,
+) {
+    let behavior = state.borrow().app_settings.start_behavior;
+    match behavior {
+        StartBehavior::FreshIdea => {
+            set_workspace_mode(state, overlay, editor_mode_stack, editor_chrome, true);
+            ideas_workspace.clear_current_idea();
+            overlay.hide();
+            editors.clear();
+            update_casing_button(state, casing_button);
+            update_track_name_label(state, track_name_label);
+            ideas_workspace.focus_verses();
+        }
+        StartBehavior::LastIdea => {
+            set_workspace_mode(state, overlay, editor_mode_stack, editor_chrome, true);
+            overlay.hide();
+            ideas_workspace.restore_latest_idea();
+            ideas_workspace.focus_verses();
+        }
+        StartBehavior::LastTrack => {
+            set_workspace_mode(state, overlay, editor_mode_stack, editor_chrome, false);
+            overlay.hide();
+            if is_placeholder_artist(&state.borrow().artist) {
+                editors.clear();
+                update_casing_button(state, casing_button);
+                update_track_name_label(state, track_name_label);
+            } else {
+                open_initial_track(
+                    state,
+                    editors,
+                    notice,
+                    casing_button,
+                    artwork,
+                    track_name_label,
+                );
+            }
+        }
+        StartBehavior::TrackList => {
+            set_workspace_mode(state, overlay, editor_mode_stack, editor_chrome, false);
+            overlay.hide();
+            open_track_overlay(
+                state,
+                editors,
+                overlay,
+                notice,
+                window,
+                casing_button,
+                artwork,
+                track_name_label,
+            );
+        }
     }
-    show_artists_tab(window, &state, &editors, &overlay, &notice);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -3838,6 +3903,9 @@ fn show_settings_tab(
     let font_combo = font_size_combo(state.borrow().app_settings.font_size_pt);
     font_combo.set_halign(gtk::Align::Start);
 
+    let start_behavior_combo = start_behavior_combo(state.borrow().app_settings.start_behavior);
+    start_behavior_combo.set_halign(gtk::Align::Start);
+
     let casing_combo = gtk::ComboBoxText::new();
     casing_combo.append_text("preserve");
     casing_combo.append_text("uppercase");
@@ -3863,6 +3931,9 @@ fn show_settings_tab(
     overlay
         .settings_box
         .append(&settings_row("editor font size", &font_combo));
+    overlay
+        .settings_box
+        .append(&settings_row("start behaviour", &start_behavior_combo));
     overlay
         .settings_box
         .append(&settings_row("new track casing", &casing_combo));
@@ -3925,6 +3996,24 @@ fn show_settings_tab(
                 lower_left_font_combo.set_active(Some(index as u32));
             }
             rebuild_material_ui(&state, &editors, &overlay, &notice);
+        });
+    }
+
+    {
+        let state = state.clone();
+        let notice = notice.clone();
+        start_behavior_combo.connect_changed(move |combo| {
+            let Some(text) = combo.active_text() else {
+                return;
+            };
+            let Some(behavior) = StartBehavior::from_label(text.as_str()) else {
+                return;
+            };
+            let mut state_ref = state.borrow_mut();
+            state_ref.app_settings.start_behavior = behavior;
+            if let Err(err) = state_ref.settings_store.save(&state_ref.app_settings) {
+                notifications::show_error(&notice, err.to_string());
+            }
         });
     }
 
@@ -5529,6 +5618,22 @@ fn font_size_combo(active_size: u16) -> gtk::ComboBoxText {
         .unwrap_or(3);
     combo.set_active(Some(active_index as u32));
     combo.set_tooltip_text(Some("Editor font size"));
+    combo
+}
+
+fn start_behavior_combo(active_behavior: StartBehavior) -> gtk::ComboBoxText {
+    let combo = gtk::ComboBoxText::new();
+    combo.add_css_class("font-size-combo");
+    for label in [
+        StartBehavior::FreshIdea.label(),
+        StartBehavior::LastIdea.label(),
+        StartBehavior::LastTrack.label(),
+        StartBehavior::TrackList.label(),
+    ] {
+        combo.append_text(label);
+    }
+    combo.set_active(Some(active_behavior.combo_index()));
+    combo.set_tooltip_text(Some("Start behaviour"));
     combo
 }
 

@@ -401,6 +401,37 @@ impl IdeasWorkspace {
         self.update_casing_button();
     }
 
+    pub fn clear_current_idea(&self) {
+        self.save_if_dirty();
+        {
+            let mut state = self.state.borrow_mut();
+            state.programmatic_change = true;
+            state.current = None;
+            state.is_dirty = false;
+            state.is_stored_as_idea = false;
+        }
+        self.in_out_buffer.set_text("");
+        self.verses_buffer.set_text("");
+        self.hooks_buffer.set_text("");
+        {
+            let mut state = self.state.borrow_mut();
+            state.programmatic_change = false;
+        }
+        self.refresh_stats();
+        self.update_ideas_structure_tool();
+        self.refresh_name_glow();
+        self.refresh_manager();
+    }
+
+    pub fn restore_latest_idea(&self) {
+        let snapshot = self.idea_store.latest_idea().ok().flatten();
+        if let Some(snapshot) = snapshot {
+            self.load_snapshot(snapshot);
+        } else {
+            self.clear_current_idea();
+        }
+    }
+
     pub fn set_font_size(&self, font_size: u16) {
         self.install_font_size(font_size);
         let index = [10_u16, 12, 14, 16, 18]
