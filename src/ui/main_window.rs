@@ -3098,6 +3098,11 @@ fn connect_structure_insert(button: &gtk::Button, editors: &Rc<EditorPanes>, kin
 
 fn update_structure_tool_labels(widgets: &StructureToolWidgets, final_text: &str) {
     let sanitize = |s: String| s.replace(['[', ']'], "");
+    let has_intro = structure_kind_used_in_final_text(final_text, StructureKind::Intro);
+    let has_outro = structure_kind_used_in_final_text(final_text, StructureKind::Outro);
+
+    widgets.intro.set_visible(!has_intro);
+    widgets.outro.set_visible(!has_outro);
 
     widgets
         .intro
@@ -3140,6 +3145,15 @@ fn structure_tool_label_for_kind(final_text: &str, kind: StructureKind) -> Strin
             next_structure_number(final_text, StructureKind::Hook)
         ),
         StructureKind::Outro => "[OUTRO]".to_owned(),
+    }
+}
+
+fn structure_kind_used_in_final_text(final_text: &str, kind: StructureKind) -> bool {
+    let normalized = final_text.to_ascii_lowercase();
+    match kind {
+        StructureKind::Intro => normalized.contains("[intro]"),
+        StructureKind::Outro => normalized.contains("[outro]"),
+        _ => false,
     }
 }
 
@@ -3748,17 +3762,19 @@ fn update_track_menu_state(state: &Rc<RefCell<MainState>>, overlay: &Rc<TrackOve
         .filter(|name| !name.is_empty());
 
     if artist_selected && !artist_name.is_empty() {
+        let escaped_name = gtk::glib::markup_escape_text(artist_name);
         overlay
             .artists_tab_label
-            .set_text(&format!("ARTISTS {artist_name}"));
+            .set_markup(&format!("<b>{escaped_name}</b>"));
     } else {
         overlay.artists_tab_label.set_text("ARTISTS");
     }
 
     if let Some(track_name) = track_name {
+        let escaped_name = gtk::glib::markup_escape_text(track_name);
         overlay
             .tracks_tab_label
-            .set_text(&format!("TRACKS {track_name}"));
+            .set_markup(&format!("<b>{escaped_name}</b>"));
     } else {
         overlay.tracks_tab_label.set_text("TRACKS");
     }
@@ -6270,6 +6286,14 @@ mod tests {
             structure_tool_label_for_kind(text, StructureKind::Outro),
             "[OUTRO]"
         );
+    }
+
+    #[test]
+    fn structure_tool_intro_and_outro_visibility_follow_final_editor_tags() {
+        assert!(structure_kind_used_in_final_text("[intro]\nstart", StructureKind::Intro));
+        assert!(structure_kind_used_in_final_text("[OUTRO]\nclose", StructureKind::Outro));
+        assert!(!structure_kind_used_in_final_text("[verse 1]\na", StructureKind::Intro));
+        assert!(!structure_kind_used_in_final_text("[hook]\na", StructureKind::Outro));
     }
 
     #[test]
