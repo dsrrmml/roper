@@ -92,7 +92,8 @@ textview {
   min-width: 20px;
   margin: 0;
   padding: 0;
-  background: transparent;
+  /* Match the toolbar/top-bar background (#191821) at 40% opacity */
+  background: rgba(25, 24, 33, 0.40);
 }
 .raw-gutter {
   min-width: 0px;
