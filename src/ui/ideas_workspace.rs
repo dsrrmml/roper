@@ -155,7 +155,7 @@ impl IdeasWorkspace {
         transfer_button.add_css_class("toolbar-control");
         transfer_button.set_size_request(-1, 36);
 
-        let leave_button = icon_button("close.svg", "Close ideas");
+        let leave_button = icon_button("menu.svg", "OPEN MENU");
         leave_button.add_css_class("secondary-button");
         leave_button.add_css_class("ideas-toolbar-button");
         leave_button.add_css_class("ideas-toolbar-right-button");

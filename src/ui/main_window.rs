@@ -213,7 +213,7 @@ pub fn show_in_window(window: &gtk::ApplicationWindow, artist: Artist) {
         loading_page: false,
         search_marker_layer: None,
         track_stats_widgets: HashMap::new(),
-        ideas_mode_active: false,
+        ideas_mode_active: startup_uses_ideas_workspace(app_settings.start_behavior),
     }));
 
     if is_placeholder_artist(&artist) {
@@ -247,7 +247,7 @@ pub fn show_in_window(window: &gtk::ApplicationWindow, artist: Artist) {
     editor_mode_stack.set_vexpand(true);
     editor_mode_stack.add_named(&editors.root, Some("tracks-editor"));
     editor_mode_stack.add_named(&ideas_workspace.root, Some("ideas-editor"));
-    editor_mode_stack.set_visible_child_name("tracks-editor");
+    editor_mode_stack.set_visible_child_name(startup_workspace_child_name(app_settings.start_behavior));
     background_overlay.set_child(Some(&editor_mode_stack));
     background_blur.append(&background_overlay);
     root_overlay.set_child(Some(&background_blur));
@@ -1820,9 +1820,22 @@ fn request_remove_track(
     });
 }
 
+fn startup_uses_ideas_workspace(behavior: StartBehavior) -> bool {
+    matches!(behavior, StartBehavior::FreshIdea | StartBehavior::LastIdea)
+}
+
+fn startup_workspace_child_name(behavior: StartBehavior) -> &'static str {
+    if startup_uses_ideas_workspace(behavior) {
+        "ideas-editor"
+    } else {
+        "tracks-editor"
+    }
+}
+
 fn track_meta_bubbles(settings: &TrackSettings) -> gtk::Box {
     let meta = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     meta.add_css_class("track-meta-bubbles");
+    meta.set_size_request(-1, 28);
     meta.set_hexpand(false);
     meta.set_vexpand(false);
     meta.set_halign(gtk::Align::Start);
@@ -1836,7 +1849,9 @@ fn track_meta_bubble(text: &str) -> gtk::Label {
     let bubble = gtk::Label::new(Some(text));
     bubble.add_css_class("track-meta-bubble");
     bubble.set_xalign(0.5);
+    bubble.set_halign(gtk::Align::Start);
     bubble.set_vexpand(false);
+    bubble.set_wrap(true);
     bubble
 }
 
@@ -1847,6 +1862,7 @@ fn track_text_stats_bubbles(
 ) -> TrackStatsWidgets {
     let root = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     root.add_css_class("track-stats-bubbles");
+    root.set_size_request(-1, 28);
     root.set_hexpand(false);
     root.set_vexpand(false);
     root.set_halign(gtk::Align::Start);
@@ -1881,6 +1897,10 @@ fn row_action_stack(edit: gtk::Button, remove: gtk::Button, row_height: i32) -> 
     stack
 }
 
+fn track_row_content_height(row_height: i32) -> i32 {
+    row_height.max(0)
+}
+
 fn track_structure_bubbles(paths: &TrackPaths) -> gtk::Box {
     let bubbles = gtk::Box::new(gtk::Orientation::Horizontal, 4);
     bubbles.add_css_class("track-structure-bubbles");
@@ -1889,25 +1909,23 @@ fn track_structure_bubbles(paths: &TrackPaths) -> gtk::Box {
     bubbles.set_vexpand(false);
     bubbles.set_halign(gtk::Align::Start);
     bubbles.set_valign(gtk::Align::Center);
-    bubbles.set_overflow(gtk::Overflow::Hidden);
 
     let Ok(final_text) = fs::read_to_string(&paths.final_path) else {
         return bubbles;
     };
 
     let sections = structure_sequence(&final_text);
-    let max_length = sections
+    let total_length = sections
         .iter()
         .map(|section| section.range.end.saturating_sub(section.range.start))
-        .max()
-        .unwrap_or(0);
+        .sum::<usize>();
 
     for section in sections {
         let length = section.range.end.saturating_sub(section.range.start);
         bubbles.append(&structure_bubble(
             section.kind,
             section.bucket,
-            structure_bubble_width(length, max_length),
+            structure_bubble_width(length, total_length),
             length,
         ));
     }
@@ -1947,12 +1965,12 @@ fn structure_bubble(
     bubble
 }
 
-fn structure_bubble_width(length: usize, max_length: usize) -> i32 {
-    if max_length == 0 {
+fn structure_bubble_width(length: usize, total_length: usize) -> i32 {
+    if total_length == 0 {
         return STRUCTURE_BUBBLE_MIN_WIDTH;
     }
 
-    let scaled = (STRUCTURE_BUBBLE_MAX_WIDTH as f64 * length as f64 / max_length as f64).round();
+    let scaled = (STRUCTURE_BUBBLE_MAX_WIDTH as f64 * length as f64 / total_length as f64).round();
     (scaled as i32).clamp(STRUCTURE_BUBBLE_MIN_WIDTH, STRUCTURE_BUBBLE_MAX_WIDTH)
 }
 
@@ -5850,10 +5868,25 @@ mod tests {
     }
 
     #[test]
+    fn startup_workspace_mode_prefers_ideas_for_idea_start_behaviors() {
+        assert!(startup_uses_ideas_workspace(StartBehavior::FreshIdea));
+        assert!(startup_uses_ideas_workspace(StartBehavior::LastIdea));
+        assert!(!startup_uses_ideas_workspace(StartBehavior::LastTrack));
+        assert!(!startup_uses_ideas_workspace(StartBehavior::TrackList));
+    }
+
+    #[test]
     fn track_list_artwork_cannot_expand_track_rows() {
         assert_eq!(LIST_IMAGE_COLUMN_WIDTH, 160);
         assert_eq!(TRACK_ROW_HEIGHT, LIST_IMAGE_COLUMN_WIDTH);
         assert_eq!(TRACK_LIST_THUMBNAIL_SIZE, LIST_IMAGE_COLUMN_WIDTH);
+    }
+
+    #[test]
+    fn track_row_content_height_matches_row_height() {
+        assert_eq!(track_row_content_height(TRACK_ROW_HEIGHT), TRACK_ROW_HEIGHT);
+        assert_eq!(track_row_content_height(0), 0);
+        assert_eq!(track_row_content_height(-16), 0);
     }
 
     #[test]
@@ -5905,6 +5938,13 @@ mod tests {
             (STRUCTURE_BUBBLE_MAX_WIDTH as f64 * 0.5).round() as i32
         );
         assert!(structure_bubble_width(25, 100) < structure_bubble_width(75, 100));
+    }
+
+    #[test]
+    fn track_structure_bubble_width_scales_by_total_track_length() {
+        assert_eq!(structure_bubble_width(50, 200), 20);
+        assert_eq!(structure_bubble_width(50, 300), 14);
+        assert_eq!(structure_bubble_width(100, 300), 27);
     }
 
     #[test]

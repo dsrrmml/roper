@@ -804,9 +804,18 @@ textview {
 .track-meta-bubbles {
   background: transparent;
   margin-top: 2px;
+  min-width: 0;
+  max-width: 500px;
 }
 
 .track-meta-bubble {
+  display: inline-flex;
+  max-width: 500px;
+  white-space: normal;
+  line-height: 1.0;
+  overflow-wrap: anywhere;
+  padding: 2px 8px;
+}
   background: rgba(10, 16, 21, 0.58);
   border: none;
   border-radius: 0;
