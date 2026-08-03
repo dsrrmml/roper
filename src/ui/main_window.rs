@@ -383,6 +383,7 @@ pub fn show_in_window(window: &gtk::ApplicationWindow, artist: Artist) {
         ))
     };
     *overlay_holder.borrow_mut() = Some(overlay.clone());
+    ideas_workspace.bind_ideas_tab_label(&overlay.ideas_tab_label);
     root_overlay.add_overlay(&overlay.layer);
     root_overlay.add_overlay(&editor_chrome);
 

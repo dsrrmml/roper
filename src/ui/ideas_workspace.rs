@@ -78,6 +78,7 @@ pub struct IdeasWorkspace {
     manager_list: gtk::ListBox,
     transfer_content: gtk::Box,
     transfer_complete_handler: TransferCompleteHandler,
+    ideas_tab_label: RefCell<Option<gtk::Label>>,
 }
 
 struct IdeasState {
@@ -313,6 +314,7 @@ impl IdeasWorkspace {
         transfer_content.set_vexpand(true);
         transfer_panel.append(&transfer_content);
         let transfer_complete_handler: TransferCompleteHandler = Rc::new(RefCell::new(None));
+        let ideas_tab_label: RefCell<Option<gtk::Label>> = RefCell::new(None);
         let transfer_close_row = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         transfer_close_row.add_css_class("ideas-transfer-close-row");
         transfer_close_row.set_height_request(36);
@@ -377,6 +379,7 @@ impl IdeasWorkspace {
             manager_list,
             transfer_content,
             transfer_complete_handler,
+            ideas_tab_label,
         };
 
         workspace.install_handlers();
@@ -387,6 +390,13 @@ impl IdeasWorkspace {
         workspace.refresh_manager();
         workspace.show_artist_picker_for_transfer();
         Ok(workspace)
+    }
+
+    pub fn bind_ideas_tab_label(&self, label: &gtk::Label) {
+        self.ideas_tab_label.replace(Some(label.clone()));
+        if let Some(current) = self.state.borrow().current.as_ref() {
+            self.update_ideas_tab_label(current.settings.updated_unix);
+        }
     }
 
     pub fn focus_verses(&self) {
@@ -739,6 +749,7 @@ impl IdeasWorkspace {
             manager_list: self.manager_list.clone(),
             transfer_content: self.transfer_content.clone(),
             transfer_complete_handler: self.transfer_complete_handler.clone(),
+            ideas_tab_label: self.ideas_tab_label.clone(),
         }
     }
 
@@ -799,6 +810,13 @@ impl IdeasWorkspace {
         }
         self.refresh_stats();
         self.update_ideas_structure_tool();
+        self.update_ideas_tab_label(snapshot.settings.updated_unix);
+    }
+
+    fn update_ideas_tab_label(&self, updated_unix: u64) {
+        if let Some(label) = self.ideas_tab_label.borrow().as_ref() {
+            label.set_text(&format_idea_datetime(updated_unix));
+        }
     }
 
     fn on_text_changed(&self) {
@@ -1772,12 +1790,12 @@ fn idea_word_count(text: &str) -> usize {
 
 fn format_idea_datetime(unix: u64) -> String {
     let Ok(date_time) = gtk::glib::DateTime::from_unix_local(unix as i64) else {
-        return "000000 - 00:00".to_string();
+        return "000000-000000".to_string();
     };
     date_time
-        .format("%d%m%y - %H:%M")
+        .format("%H%M-%d%m%y")
         .map(|value| value.to_string())
-        .unwrap_or_else(|_| "000000 - 00:00".to_string())
+        .unwrap_or_else(|_| "000000-000000".to_string())
 }
 
 fn apply_search_highlights(buffer: &gtk::TextBuffer, matches: &[SearchMatch]) {

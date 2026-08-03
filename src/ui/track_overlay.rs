@@ -40,6 +40,7 @@ pub struct TrackOverlay {
     pub artists_tab_label: gtk::Label,
     pub tracks_tab_label: gtk::Label,
     pub ideas_tab_button: gtk::Button,
+    pub ideas_tab_label: gtk::Label,
     pub settings_tab_button: gtk::Button,
     pub info_tab_button: gtk::Button,
     pub exit_tab_button: gtk::Button,
@@ -100,7 +101,7 @@ impl TrackOverlay {
         tab_bar.add_css_class("menu-tabs");
         let (artists_tab_button, artists_tab_label) = tab_button("artist.svg", "ARTISTS");
         let (tracks_tab_button, tracks_tab_label) = tab_button("lyrics.svg", "TRACKS");
-        let (ideas_tab_button, _) = tab_button("lightbulb.svg", "IDEAS");
+        let (ideas_tab_button, ideas_tab_label) = tab_button("lightbulb.svg", "IDEAS");
         let (settings_tab_button, _) = tab_button("tab-settings.svg", "SETTINGS");
         let (info_tab_button, _) = tab_button("info.svg", "INFO");
         let (exit_tab_button, _) = tab_button("exit.svg", "EXIT");
@@ -194,6 +195,7 @@ impl TrackOverlay {
             artists_tab_label,
             tracks_tab_label,
             ideas_tab_button,
+            ideas_tab_label,
             settings_tab_button,
             info_tab_button,
             exit_tab_button,
