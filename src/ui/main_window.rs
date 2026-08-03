@@ -1902,12 +1902,12 @@ fn track_row_content_height(row_height: i32) -> i32 {
 }
 
 fn track_structure_bubbles(paths: &TrackPaths) -> gtk::Box {
-    let bubbles = gtk::Box::new(gtk::Orientation::Horizontal, 4);
+    let bubbles = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     bubbles.add_css_class("track-structure-bubbles");
     bubbles.set_size_request(-1, 14);
-    bubbles.set_hexpand(false);
+    bubbles.set_hexpand(true);
     bubbles.set_vexpand(false);
-    bubbles.set_halign(gtk::Align::Start);
+    bubbles.set_halign(gtk::Align::Fill);
     bubbles.set_valign(gtk::Align::Center);
 
     let Ok(final_text) = fs::read_to_string(&paths.final_path) else {
@@ -1920,15 +1920,24 @@ fn track_structure_bubbles(paths: &TrackPaths) -> gtk::Box {
         .map(|section| section.range.end.saturating_sub(section.range.start))
         .sum::<usize>();
 
+    let mut bubble_specs = Vec::new();
     for section in sections {
         let length = section.range.end.saturating_sub(section.range.start);
-        bubbles.append(&structure_bubble(
-            section.kind,
-            section.bucket,
-            structure_bubble_width(length, total_length),
-            length,
-        ));
+        let bubble = structure_bubble(section.kind, section.bucket, STRUCTURE_BUBBLE_MIN_WIDTH, length);
+        bubbles.append(&bubble);
+        bubble_specs.push((bubble, length));
     }
+
+    let bubbles_for_update = bubbles.clone();
+    let bubble_specs_for_update = bubble_specs;
+    let total_length_for_update = total_length;
+    bubbles.connect_realize(move |_| {
+        let available_width = bubbles_for_update.width().max(STRUCTURE_BUBBLE_MIN_WIDTH);
+        for (bubble, length) in bubble_specs_for_update.iter() {
+            let width = structure_bubble_width(*length, total_length_for_update, available_width);
+            bubble.set_size_request(width, STRUCTURE_BUBBLE_HEIGHT);
+        }
+    });
 
     bubbles
 }
@@ -1942,9 +1951,9 @@ fn structure_bubble(
     let bubble = gtk::DrawingArea::new();
     bubble.add_css_class("structure-bubble");
     bubble.set_size_request(width, STRUCTURE_BUBBLE_HEIGHT);
-    bubble.set_hexpand(false);
+    bubble.set_hexpand(true);
     bubble.set_vexpand(false);
-    bubble.set_halign(gtk::Align::Start);
+    bubble.set_halign(gtk::Align::Fill);
     bubble.set_valign(gtk::Align::Center);
     bubble.set_tooltip_text(Some(&format!(
         "{} · {} chars",
@@ -1965,13 +1974,14 @@ fn structure_bubble(
     bubble
 }
 
-fn structure_bubble_width(length: usize, total_length: usize) -> i32 {
-    if total_length == 0 {
-        return STRUCTURE_BUBBLE_MIN_WIDTH;
+fn structure_bubble_width(length: usize, total_length: usize, available_width: i32) -> i32 {
+    let available_width = available_width.max(STRUCTURE_BUBBLE_MIN_WIDTH);
+    if total_length == 0 || length == 0 {
+        return STRUCTURE_BUBBLE_MIN_WIDTH.min(available_width);
     }
 
-    let scaled = (STRUCTURE_BUBBLE_MAX_WIDTH as f64 * length as f64 / total_length as f64).round();
-    (scaled as i32).clamp(STRUCTURE_BUBBLE_MIN_WIDTH, STRUCTURE_BUBBLE_MAX_WIDTH)
+    let scaled = (available_width as f64 * length as f64 / total_length as f64).round();
+    (scaled as i32).clamp(STRUCTURE_BUBBLE_MIN_WIDTH, available_width)
 }
 
 fn structure_bubble_color(kind: StructureKind, bucket: usize) -> (f64, f64, f64, f64) {
@@ -5931,28 +5941,25 @@ mod tests {
 
     #[test]
     fn track_structure_bubble_width_represents_section_length() {
-        assert_eq!(structure_bubble_width(100, 100), STRUCTURE_BUBBLE_MAX_WIDTH);
-        assert_eq!(structure_bubble_width(0, 100), STRUCTURE_BUBBLE_MIN_WIDTH);
-        assert_eq!(
-            structure_bubble_width(50, 100),
-            (STRUCTURE_BUBBLE_MAX_WIDTH as f64 * 0.5).round() as i32
-        );
-        assert!(structure_bubble_width(25, 100) < structure_bubble_width(75, 100));
+        assert_eq!(structure_bubble_width(100, 100, 400), 400);
+        assert_eq!(structure_bubble_width(0, 100, 400), STRUCTURE_BUBBLE_MIN_WIDTH);
+        assert_eq!(structure_bubble_width(50, 100, 400), 200);
+        assert!(structure_bubble_width(25, 100, 400) < structure_bubble_width(75, 100, 400));
     }
 
     #[test]
     fn track_structure_bubble_width_scales_by_total_track_length() {
-        assert_eq!(structure_bubble_width(50, 200), 20);
-        assert_eq!(structure_bubble_width(50, 300), 14);
-        assert_eq!(structure_bubble_width(100, 300), 27);
+        assert_eq!(structure_bubble_width(50, 200, 400), 100);
+        assert_eq!(structure_bubble_width(50, 300, 400), 67);
+        assert_eq!(structure_bubble_width(100, 300, 400), 133);
     }
 
     #[test]
     fn track_structure_bubble_width_is_capped_at_eighty_one_pixels() {
         assert_eq!(STRUCTURE_BUBBLE_MAX_WIDTH, 81);
         assert_eq!(
-            structure_bubble_width(usize::MAX, usize::MAX),
-            STRUCTURE_BUBBLE_MAX_WIDTH
+            structure_bubble_width(usize::MAX, usize::MAX, 400),
+            400
         );
     }
 
