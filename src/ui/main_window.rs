@@ -192,8 +192,10 @@ pub fn show_in_window(window: &gtk::ApplicationWindow, artist: Artist) {
             return;
         }
     };
+    let resolved_artist = resolve_initial_artist(artist, &app_settings);
+
     let state = Rc::new(RefCell::new(MainState {
-        artist: artist.clone(),
+        artist: resolved_artist.clone(),
         track_store,
         settings_store,
         app_settings: app_settings.clone(),
@@ -215,10 +217,10 @@ pub fn show_in_window(window: &gtk::ApplicationWindow, artist: Artist) {
         ideas_mode_active: startup_uses_ideas_workspace(app_settings.start_behavior),
     }));
 
-    if is_placeholder_artist(&artist) {
+    if is_placeholder_artist(&resolved_artist) {
         window.set_title(Some("ROPER"));
     } else {
-        window.set_title(Some(&format!("ROPER - {}", artist.name)));
+        window.set_title(Some(&format!("ROPER - {}", resolved_artist.name)));
     }
     window.add_css_class("surface");
     window_policy::set_fullscreen_enabled(window, app_settings.fullscreen);
@@ -1495,15 +1497,14 @@ fn open_track_overlay(
     overlay.clear_list();
     overlay.clear_edit();
     let active_artist = state.borrow().artist.clone();
+    update_track_menu_state(state, overlay);
     if is_placeholder_artist(&active_artist) {
-        overlay.create_button.set_sensitive(false);
         overlay.create_button.remove_css_class("tab-action-blink");
         state.borrow_mut().pager = None;
         let width = window.width();
         overlay.show(width);
         return;
     }
-    overlay.create_button.set_sensitive(true);
     overlay.create_button.remove_css_class("tab-action-blink");
     overlay
         .create_button
@@ -2225,6 +2226,7 @@ fn open_track_by_id_with_options(
     let store = state.borrow().track_store.clone();
     match store.load_track(id) {
         Ok((settings, final_text, raw_text, paths)) => {
+            sync_artist_context_for_track(state, notice, &settings.artist_id);
             let dummy_overlay = Rc::new(TrackOverlay::new(|| {}, |_| {}));
             set_open_track(
                 state,
@@ -3364,10 +3366,17 @@ fn select_artist_and_show_tracks(
     artist: Artist,
 ) {
     flush_current(state, editors, notice);
-    {
+    let persisted = {
         let mut state_ref = state.borrow_mut();
-        state_ref.artist = artist;
+        state_ref.artist = artist.clone();
+        state_ref.app_settings.last_artist_id = Some(artist.id.clone());
+        state_ref.settings_store.save(&state_ref.app_settings)
+    };
+    if let Err(err) = persisted {
+        notifications::show_error(notice, err.to_string());
+        return;
     }
+    update_track_menu_state(state, overlay);
     open_track_overlay(
         state,
         editors,
@@ -3661,12 +3670,76 @@ fn overlay_track_list_is_empty(overlay: &TrackOverlay) -> bool {
         .is_some_and(|child| child.first_child().is_none())
 }
 
-pub fn startup_artist() -> Artist {
+pub fn startup_artist(app_settings: &AppSettings) -> Artist {
     ArtistStore::new_default()
         .and_then(|store| store.load())
         .ok()
-        .and_then(|file| file.artists.into_iter().next())
+        .and_then(|file| {
+            file.artists.iter().find(|artist| {
+                app_settings
+                    .last_artist_id
+                    .as_deref()
+                    .is_some_and(|last_artist_id| artist.id == last_artist_id)
+            }).cloned().or_else(|| file.artists.into_iter().next())
+        })
         .unwrap_or_else(placeholder_artist)
+}
+
+fn sync_artist_context_for_track(
+    state: &Rc<RefCell<MainState>>,
+    notice: &gtk::Label,
+    artist_id: &str,
+) {
+    let store = match ArtistStore::new_default() {
+        Ok(store) => store,
+        Err(err) => {
+            notifications::show_error(notice, err.to_string());
+            return;
+        }
+    };
+    let Ok(file) = store.load() else {
+        return;
+    };
+    let Some(artist) = file.artists.into_iter().find(|candidate| candidate.id == artist_id) else {
+        return;
+    };
+
+    let mut state_ref = state.borrow_mut();
+    state_ref.artist = artist;
+    state_ref.app_settings.last_artist_id = Some(artist_id.to_owned());
+    if let Err(err) = state_ref.settings_store.save(&state_ref.app_settings) {
+        notifications::show_error(notice, err.to_string());
+    }
+}
+
+fn resolve_initial_artist(artist: Artist, app_settings: &AppSettings) -> Artist {
+    if !is_placeholder_artist(&artist) {
+        return artist;
+    }
+    let store = match ArtistStore::new_default() {
+        Ok(store) => store,
+        Err(_) => return artist,
+    };
+    let Ok(file) = store.load() else {
+        return artist;
+    };
+    file.artists
+        .iter()
+        .find(|candidate| {
+            app_settings
+                .last_artist_id
+                .as_deref()
+                .is_some_and(|last_artist_id| candidate.id == last_artist_id)
+        })
+        .cloned()
+        .or_else(|| file.artists.into_iter().next())
+        .unwrap_or_else(placeholder_artist)
+}
+
+fn update_track_menu_state(state: &Rc<RefCell<MainState>>, overlay: &Rc<TrackOverlay>) {
+    let artist_selected = !is_placeholder_artist(&state.borrow().artist);
+    overlay.tracks_tab_button.set_sensitive(artist_selected);
+    overlay.create_button.set_sensitive(artist_selected);
 }
 
 fn placeholder_artist() -> Artist {
@@ -3716,7 +3789,7 @@ fn request_remove_artist(
             Ok(_) => {
                 notifications::show_info(&notice, "Artist removed.");
                 if state.borrow().artist.id == artist.id {
-                    show_in_window(&window, startup_artist());
+                    show_in_window(&window, startup_artist(&state.borrow().app_settings));
                 } else {
                     show_artists_tab(
                         &window,

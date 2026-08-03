@@ -39,9 +39,12 @@ pub fn show(app: &gtk::Application) {
     window.set_child(Some(&root));
     window.present();
 
+    let app_settings = SettingsStore::new_default()
+        .and_then(|store| store.load())
+        .unwrap_or_else(|_| AppSettings::default());
     let app = app.clone();
     gtk::glib::timeout_add_local_once(SPLASH_HOLD, move || {
-        fade_to_artist_selector(app, window, root);
+        fade_to_artist_selector(app, window, root, app_settings.clone());
     });
 }
 
@@ -141,6 +144,7 @@ fn fade_to_artist_selector(
     app: gtk::Application,
     window: gtk::ApplicationWindow,
     root: gtk::Overlay,
+    app_settings: AppSettings,
 ) {
     let started = Instant::now();
     let finished = Rc::new(Cell::new(false));
@@ -150,7 +154,7 @@ fn fade_to_artist_selector(
 
         if progress >= 1.0 && !finished.replace(true) {
             let _ = app;
-            main_window::show_in_window(&window, main_window::startup_artist());
+            main_window::show_in_window(&window, main_window::startup_artist(&app_settings));
             gtk::glib::ControlFlow::Break
         } else if progress >= 1.0 {
             gtk::glib::ControlFlow::Break

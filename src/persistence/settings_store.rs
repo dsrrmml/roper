@@ -76,6 +76,8 @@ pub struct AppSettings {
     pub last_workspace_mode: String,
     #[serde(default)]
     pub last_idea_id: Option<String>,
+    #[serde(default)]
+    pub last_artist_id: Option<String>,
 }
 
 impl Default for AppSettings {
@@ -88,6 +90,7 @@ impl Default for AppSettings {
             start_behavior: StartBehavior::default(),
             last_workspace_mode: default_workspace_mode(),
             last_idea_id: None,
+            last_artist_id: None,
         }
     }
 }
@@ -197,6 +200,20 @@ mod tests {
         store.save(&settings).expect("settings can be saved");
         let loaded = store.load().expect("settings can be loaded");
         assert_eq!(loaded.start_behavior, StartBehavior::FreshIdea);
+    }
+
+    #[test]
+    fn save_and_load_roundtrip_last_artist_id() {
+        let dir = tempdir().expect("temp dir can be created");
+        let path = dir.path().join("settings.json");
+        let store = SettingsStore::new(path.clone());
+        let settings = AppSettings {
+            last_artist_id: Some("artist-123".to_owned()),
+            ..AppSettings::default()
+        };
+        store.save(&settings).expect("settings can be saved");
+        let loaded = store.load().expect("settings can be loaded");
+        assert_eq!(loaded.last_artist_id.as_deref(), Some("artist-123"));
     }
 
     #[test]
