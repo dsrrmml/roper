@@ -1,69 +1,92 @@
 # ROPER
 
-ROPER is a native GTK 4 desktop app for Linux focused on one job: turning rough rap fragments into finished lyrics without leaving your local machine.
+ROPER is a native RUST/GTK4 desktop app for Linux (tested on Debian Trixie) focused on turning rough idea fragments into finished lyrics.
 
 This documentation covers:
 
-- practical writing workflows
-- how highlighting works (and why it matters)
-- minimap behavior on long tracks
-- ideas workspace flow
-- packaging and local data layout
-- demo content + screenshots included in this repository
+- WHY I HAVE BUILT IT
+- PRACTICAL WORKFLOW
+- HOW HIGHLIGHTING WORKS
+- FEATURES
+- INTENDED IDEAS WORKSPACE FLOW
+- PACKAGING && LOCAL DATA LAYOUT
+- TODO
+- BUGS
+- INCOMING
+
+---
+
+## WHY I HAVE BUILT IT
+
+I needed a distractionless (yeah, even breathing distracts me) editor
+for developing text ideas over time to final lyrics for various projects.
+
+Since i never did some app-dedicated Rust and got some fresh Pink Kush
+at the same time, the project started.
+
+I needed an (for me) distractionless text editor with minimal feature-set,
+font-property- and formatting-wise.
+
+For me the main features where:
+
+- the editor has to be open in fullscreen, no visible border to the screens
+edges of the visible area.
+
+- only UPPERCASE/lowercase, Preserving-case-mode and font-size as formatting 
+tools.
+
+- two-pane editor-mode for separate raw- and final version of the lyrics.
+I like to have a pool of loosely gathered text material on the left side,
+labelled as "raw" and then compose/condense that into final lyric material
+on the right side, labelled as "final".
+
+- three-pane editor-mode for developing ideas, because sometimes i have ideas
+for an hook- or bridge-part and at the same time i do not want to have that
+in the same visible, vertical lane as the currently developing idea.
+
+- the editor should automatically save all data entering its editor panes, 
+i will always able to close the editor, re-open it and continuing on the
+last state i left it.
+
+- working with my individual project folder style. yeah. trippy.
+
+I do already all my lyrics work with that app already and note every bug
+and wanted improvements on that way.
+
+When i was in anger because of some Ardour fuckups in between,
+i've decided to call it "ROPER".
 
 ---
 
 ## What ROPER is built for
 
-ROPER works best when you write in two phases:
+Core use-case is developing final lyrics from a heap/pool of raw ASCII text
+material. Everything which is available in the raw.txt file inside the selected
+track's lyrics subfolder gets shown in the left "raw" editor pane.
 
-1. **Raw pane** (left): free-form material, fragments, alternates, punchline variants.
-2. **Final pane** (right): structured song with sections and sequence.
+Everything which one considers as "final" is available in the final editor pane
+and therefore the content of the projects lyrics subfolders final.txt file.
 
-You can keep massive drafts and still navigate fast thanks to:
+One can start by having an idea for a line/bar/verse/part/hook/bridge/, intro or
+outro and can use the "IDEAS" three-pane editor mode for that:
+
+1. *** IN/OUT *** (left) - separates the intro/outro of an track idea from the rest.
+2. *** VERSES *** (cente) - focus on the core part of the track.
+3. *** HOOKS/BRIDGES *** - something which might change later on more often and serialized.
+
+After creating a track, eventually outside of the app and adding it afterwards, the material of the idea can be transferred to the new track. 
+
+Then it works probably best when one writes in two phases, during finalizing phase:
+
+1. *** RAW *** (left): free-form material, fragments, alternates, punchline variants.
+2. *** FINAL *** (right): structured song with sections and the wanted structure.
+
+One can keep massive drafts and still navigate relatively fast due:
 
 - live repeat highlighting
 - structure highlighting (`[INTRO]`, `[VERSE 1]`, `[HOOK]`, `[OUTRO]`, ...)
-- minimap + viewport indicator for long text
-- line-indexed raw gutter actions
-
----
-
-## Screenshot gallery (8)
-
-> Generated showcase images are stored in `docs/screenshots/`.
-
-### 1) Main split editor
-
-![ROPER workflow screenshot 1](docs/screenshots/01-workflow.png)
-
-### 2) Long-form draft with minimap
-
-![ROPER workflow screenshot 2](docs/screenshots/02-workflow.png)
-
-### 3) Live highlight density (final pane focus)
-
-![ROPER workflow screenshot 3](docs/screenshots/03-workflow.png)
-
-### 4) Raw material shaping pass
-
-![ROPER workflow screenshot 4](docs/screenshots/04-workflow.png)
-
-### 5) Ideas workspace and pane segmentation
-
-![ROPER workflow screenshot 5](docs/screenshots/05-workflow.png)
-
-### 6) Artist and track organization
-
-![ROPER workflow screenshot 6](docs/screenshots/06-workflow.png)
-
-### 7) Transfer and refinement loop
-
-![ROPER workflow screenshot 7](docs/screenshots/07-workflow.png)
-
-### 8) Session completion / final pass
-
-![ROPER workflow screenshot 8](docs/screenshots/08-workflow.png)
+- minimap + viewport indicator for vast lyrics material
+- line-indexed raw gutter actions (when they behave)
 
 ---
 
@@ -73,30 +96,37 @@ You can keep massive drafts and still navigate fast thanks to:
 
 1. Create/select artist and track.
 2. Dump ideas in the **raw pane** rapidly.
-3. Promote lines into **final pane** and add structure tags:
+3. Promote lines into **final pane** and add structure tags
+with the "STRUCTURING-TOOL":
 	- `[INTRO]`
 	- `[VERSE 1]`, `[VERSE 2]`, ...
 	- `[HOOK]` or `[HOOK 1]`, `[HOOK 2]`
 	- `[OUTRO]`
-4. Use highlight feedback to reduce repetitive weak spots.
+4. Use visual, highlighting (tags,numbers,empty lines) feedback to reduce repetitive weak or "cold" spots.
 5. Use minimap to jump large sections quickly.
 
-### Workflow B: raw-to-final iterative polishing
+### Workflow B: from idea to raw-to-final iterative polishing
 
-1. Keep alternates in raw lines.
-2. Mark and transfer only the strongest material.
-3. Let repeat heatmap expose overused words in the final pane.
-4. Rewrite while preserving cadence and structure.
+1. First develop ideas in the ideas 3 editor panes.
+2. Create/select artist and track.
+3. Transfer developed idea/s into the freshly created track.
+4. Use the pre-developed lyrics from the "RAW" section.
+5. Keep alternates in raw lines.
+6. Mark and transfer only the strongest material to "FINAL".
+7. Let repeat heatmap gutter (_1_) expose overused words in the final pane.
+8. Rewrite while preserving cadence and structure until "finished"
+
+_1_ (not yet developed feature....lel)
 
 ### Workflow C: ideas-first writing sprint
 
-1. Open Ideas workspace.
+1. Open ideas workspace.
 2. Fill all three panes:
 	- **IN/OUT** (framing, entry/exit, intro/outro language)
 	- **VERSES** (technical bars and progression)
 	- **HOOKS/BRIDGES** (anchors and transitions)
-3. Transfer selected idea content into a target track.
-4. Continue arrangement and cleanup in the split editor.
+3. Transfer selected idea content into a already existing track.
+4. Continue arrangement and cleanup in the split editor like nothing happened.
 
 ---
 
@@ -140,6 +170,7 @@ Practical use:
 Practical use:
 
 - quickly inspect high-risk lines for monotony
+- yeah, sometimes its needed for hooks..have to resolve that issue
 - force rewrite passes where lexical variety collapses
 
 ### 4) Structure highlights (section-colored ranges)

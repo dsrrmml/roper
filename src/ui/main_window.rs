@@ -3159,17 +3159,26 @@ fn structure_kind_used_in_final_text(final_text: &str, kind: StructureKind) -> b
 
 fn next_structure_number(final_text: &str, kind: StructureKind) -> usize {
     let usage = structure_number_usage(final_text, kind);
-    let next = usage
-        .max_number
-        .map(|number| number + 1)
-        .unwrap_or(usage.unnumbered_count + 1);
-    next.clamp(1, 99)
+    let mut next = 1usize;
+    while next < usage.used_numbers.len() && usage.used_numbers[next] {
+        next += 1;
+    }
+    next
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct StructureNumberUsage {
-    max_number: Option<usize>,
+    used_numbers: [bool; 101],
     unnumbered_count: usize,
+}
+
+impl Default for StructureNumberUsage {
+    fn default() -> Self {
+        Self {
+            used_numbers: [false; 101],
+            unnumbered_count: 0,
+        }
+    }
 }
 
 fn structure_number_usage(final_text: &str, expected_kind: StructureKind) -> StructureNumberUsage {
@@ -3194,7 +3203,7 @@ fn structure_number_usage(final_text: &str, expected_kind: StructureKind) -> Str
 
         let label = chars[offset + 1..close_offset].iter().collect::<String>();
         if let Some(number) = structure_tag_number_for_kind(&label, expected_kind) {
-            usage.max_number = Some(usage.max_number.unwrap_or(0).max(number));
+            usage.used_numbers[number] = true;
         } else if is_unnumbered_structure_tag_for_kind(&label, expected_kind) {
             usage.unnumbered_count += 1;
         }
@@ -3212,7 +3221,7 @@ fn structure_tag_number_for_kind(label: &str, expected_kind: StructureKind) -> O
         StructureKind::Intro | StructureKind::Outro => return None,
     };
     let number = normalized.strip_prefix(prefix)?.parse::<usize>().ok()?;
-    (1..=99).contains(&number).then_some(number)
+    (1..=100).contains(&number).then_some(number)
 }
 
 fn is_unnumbered_structure_tag_for_kind(label: &str, expected_kind: StructureKind) -> bool {
@@ -6280,7 +6289,7 @@ mod tests {
         );
         assert_eq!(
             structure_tool_label_for_kind(text, StructureKind::Hook),
-            "[HOOK 3]"
+            "[HOOK 1]"
         );
         assert_eq!(
             structure_tool_label_for_kind(text, StructureKind::Outro),
@@ -6310,18 +6319,43 @@ mod tests {
     }
 
     #[test]
-    fn structure_tool_numbers_follow_highest_existing_number() {
+    fn structure_tool_numbers_reuse_lowest_available_slot_after_removals() {
         assert_eq!(
             next_structure_number("[verse 1]\na\n[verse 3]\nb", StructureKind::Verse),
-            4
+            2
+        );
+        assert_eq!(
+            next_structure_number("[hook 2]\na\n[hook 4]\nb", StructureKind::Hook),
+            1
+        );
+        assert_eq!(
+            next_structure_number("[hook]\na\n[hook 2]\nb", StructureKind::Hook),
+            1
+        );
+    }
+
+    #[test]
+    fn structure_tool_label_reuses_verse_1_after_removing_verse_1_from_final_text() {
+        let text = "[verse 2]\na\n[verse 3]\nb\n[verse 4]\nc\n[verse 5]\nd";
+        assert_eq!(
+            structure_tool_label_for_kind(text, StructureKind::Verse),
+            "[VERSE 1]"
+        );
+    }
+
+    #[test]
+    fn structure_tool_numbers_follow_lowest_available_slot() {
+        assert_eq!(
+            next_structure_number("[verse 1]\na\n[verse 3]\nb", StructureKind::Verse),
+            2
         );
         assert_eq!(
             next_structure_number("[hook]\na\n[hook 7]\nb", StructureKind::Hook),
-            8
+            1
         );
         assert_eq!(
             next_structure_number("[hook]\na\n[HOOK]\nb", StructureKind::Hook),
-            3
+            1
         );
         assert_eq!(
             next_structure_number("[hook 100]\nignored", StructureKind::Hook),
