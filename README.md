@@ -56,10 +56,6 @@ and wanted improvements on that way.
 When i was in anger because of some Ardour fuckups in between,
 i've decided to call it "ROPER".
 
----
-
-## What ROPER is built for
-
 Core use-case is developing final lyrics from a heap/pool of raw ASCII text
 material. Everything which is available in the raw.txt file inside the selected
 track's lyrics subfolder gets shown in the left "raw" editor pane.
