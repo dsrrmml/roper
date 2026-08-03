@@ -198,7 +198,7 @@ fn apply_warning_layer(
     layer: &gtk::DrawingArea,
     final_view: &gtk::TextView,
     warnings: Vec<RepeatWarning>,
-    show_empty_line_pattern: bool,
+    _show_empty_line_pattern: bool,
 ) {
     let warnings = Rc::new(warnings);
     let final_view = final_view.clone();
