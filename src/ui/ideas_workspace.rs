@@ -1602,18 +1602,46 @@ fn insert_structure_tag_at_cursor(buffer: &gtk::TextBuffer, tag: &str) {
     let before: String = text.chars().take(cursor).collect();
     let after: String = text.chars().skip(cursor).collect();
 
+    // Ensure there is an empty line before the tag
     let mut insertion = String::new();
-    if !before.is_empty() && !before.ends_with('\n') {
-        insertion.push('\n');
+    if !before.ends_with("\n\n") {
+        if before.ends_with('\n') {
+            insertion.push('\n');
+        } else {
+            insertion.push('\n');
+            insertion.push('\n');
+        }
     }
+
     insertion.push_str(tag);
-    insertion.push('\n');
-    if !after.is_empty() && !after.starts_with('\n') {
+
+    // Ensure at least two newlines after the tag so the line underneath is
+    // empty; count existing leading newlines in `after`.
+    let mut existing_after_newlines = 0usize;
+    for ch in after.chars().take(2) {
+        if ch == '\n' {
+            existing_after_newlines += 1;
+        } else {
+            break;
+        }
+    }
+    let post_needed = 2usize.saturating_sub(existing_after_newlines);
+    for _ in 0..post_needed {
         insertion.push('\n');
     }
 
+    let pre_newlines = insertion.chars().take_while(|c| *c == '\n').count();
+    let tag_len = tag.chars().count();
+
     let mut iter = buffer.iter_at_offset(cursor as i32);
     buffer.insert(&mut iter, &insertion);
+
+    if post_needed > 0 {
+        // place cursor under the freshly-inserted tag (on the empty line)
+        let cursor_offset = cursor + pre_newlines + tag_len + 1;
+        let iter = buffer.iter_at_offset(cursor_offset as i32);
+        buffer.place_cursor(&iter);
+    }
 }
 
 fn paste_plain_text_with_trailing_newline(view: &gtk::TextView) {

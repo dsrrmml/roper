@@ -229,6 +229,7 @@ pub fn show_in_window(window: &gtk::ApplicationWindow, artist: Artist) {
 
     let editors = Rc::new(EditorPanes::new(app_settings.font_size_pt));
     editors.empty_line_pattern_enabled.set(app_settings.empty_line_pattern);
+    editors.symbols_in_minimap.set(app_settings.symbols_in_minimap);
     editors.set_track_connection(false);
     let root_overlay = gtk::Overlay::new();
     root_overlay.set_hexpand(true);
@@ -3256,18 +3257,52 @@ fn insert_structure_tag_at_cursor(buffer: &gtk::TextBuffer, tag: &str) {
     let before: String = text.chars().take(cursor).collect();
     let after: String = text.chars().skip(cursor).collect();
 
+    // Ensure there is an empty line before the inserted structure tag.
+    // If the text before cursor does not already end with two newlines, add
+    // the necessary newline(s) so the line above the tag is empty.
     let mut insertion = String::new();
-    if !before.is_empty() && !before.ends_with('\n') {
+    let pre_newlines = if before.ends_with("\n\n") {
+        0
+    } else if before.ends_with('\n') {
         insertion.push('\n');
-    }
+        1
+    } else {
+        insertion.push('\n');
+        insertion.push('\n');
+        2
+    };
+
     insertion.push_str(tag);
-    insertion.push('\n');
-    if !after.is_empty() && !after.starts_with('\n') {
+
+    // Ensure there are at least two newlines following the tag (so there is
+    // always a fresh empty line under the tag). Measure how many newlines
+    // the existing `after` begins with and add the remainder (0..=2).
+    let mut existing_after_newlines = 0usize;
+    for ch in after.chars().take(2) {
+        if ch == '\n' {
+            existing_after_newlines += 1;
+        } else {
+            break;
+        }
+    }
+    let post_needed = 2usize.saturating_sub(existing_after_newlines);
+    for _ in 0..post_needed {
         insertion.push('\n');
     }
 
+    // Insert and, if we created any post-newlines, place the cursor on the
+    // newly-created empty line directly under the tag.
     let mut iter = buffer.iter_at_offset(cursor as i32);
     buffer.insert(&mut iter, &insertion);
+
+    if post_needed > 0 {
+        // place cursor after the tag and the first newline (start of the
+        // empty line between tag and following content)
+        let tag_len = tag.chars().count();
+        let cursor_offset = cursor + pre_newlines + tag_len + 1; // +1 moves past first newline
+        let iter = buffer.iter_at_offset(cursor_offset as i32);
+        buffer.place_cursor(&iter);
+    }
 }
 
 fn set_workspace_mode(
