@@ -2503,6 +2503,7 @@ fn rebuild_material_ui(
         state.borrow().app_settings.empty_line_pattern,
         &raw_text,
         &final_text,
+        &editors.final_warning_markers,
     );
     raw_gutter::apply_used_highlights(&editors.raw_buffer, &raw_text, mode, &used);
 }
@@ -4220,9 +4221,16 @@ fn show_settings_tab(
     overlay
         .settings_box
         .append(&settings_row("fullscreen", &fullscreen_toggle));
+    let symbols_in_minimap_enabled = state.borrow().app_settings.symbols_in_minimap;
+    let symbols_in_minimap_toggle = settings_icon_toggle_button(symbols_in_minimap_enabled);
+    symbols_in_minimap_toggle.set_halign(gtk::Align::End);
+
     overlay
         .settings_box
         .append(&settings_row("empty lines pattern", &empty_line_pattern_toggle));
+    overlay
+        .settings_box
+        .append(&settings_row("symbols in minimap", &symbols_in_minimap_toggle));
     overlay
         .settings_box
         .append(&settings_row("settings file", &settings_path_label));
@@ -4273,6 +4281,29 @@ fn show_settings_tab(
             editors.final_pattern_layer.queue_draw();
             editors.final_warning_layer.queue_draw();
             rebuild_material_ui(&state, &editors, &overlay, &notice);
+        });
+    }
+
+    {
+        let state = state.clone();
+        let notice = notice.clone();
+        let editors = editors.clone();
+        let symbols_in_minimap_state = Rc::new(Cell::new(symbols_in_minimap_enabled));
+        let symbols_in_minimap_state_for_click = symbols_in_minimap_state.clone();
+        let symbols_in_minimap_toggle_for_click = symbols_in_minimap_toggle.clone();
+        symbols_in_minimap_toggle.connect_clicked(move |_| {
+            let enabled = !symbols_in_minimap_state_for_click.get();
+            symbols_in_minimap_state_for_click.set(enabled);
+            set_settings_toggle_icon(&symbols_in_minimap_toggle_for_click, enabled);
+            {
+                let mut state_ref = state.borrow_mut();
+                state_ref.app_settings.symbols_in_minimap = enabled;
+                if let Err(err) = state_ref.settings_store.save(&state_ref.app_settings) {
+                    notifications::show_error(&notice, err.to_string());
+                }
+            }
+            editors.symbols_in_minimap.set(enabled);
+            editors.final_minimap.queue_draw();
         });
     }
 

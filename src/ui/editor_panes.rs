@@ -1,7 +1,8 @@
 use gtk::prelude::*;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
+use crate::services::live_highlights::RepeatWarning;
 use crate::ui::raw_gutter::NUMBER_LANE_WIDTH;
 
 const FINAL_WARNING_MARGIN_PX: i32 = 96;
@@ -53,6 +54,8 @@ pub struct EditorPanes {
     pub final_minimap: gtk::DrawingArea,
     pub raw_minimap: gtk::DrawingArea,
     pub empty_line_pattern_enabled: Rc<Cell<bool>>,
+    pub symbols_in_minimap: Rc<Cell<bool>>,
+    pub final_warning_markers: Rc<RefCell<Vec<RepeatWarning>>>,
 }
 
 impl EditorPanes {
@@ -176,6 +179,9 @@ impl EditorPanes {
         raw_gutter.set_hexpand(false);
         raw_gutter.set_vexpand(true);
 
+        let symbols_in_minimap = Rc::new(Cell::new(false));
+        let final_warning_markers = Rc::new(RefCell::new(Vec::new()));
+
         let raw_minimap = gtk::DrawingArea::new();
         raw_minimap.add_css_class("editor-minimap");
         raw_minimap.set_size_request(EDITOR_MINIMAP_WIDTH_PX, -1);
@@ -224,6 +230,8 @@ impl EditorPanes {
         {
             let final_buffer = final_buffer.clone();
             let final_adjustment = final_adjustment.clone();
+            let symbols_in_minimap = symbols_in_minimap.clone();
+            let final_warning_markers = final_warning_markers.clone();
             final_minimap.set_draw_func(move |layer, cr, width, height| {
                 draw_editor_minimap(
                     layer,
@@ -232,6 +240,8 @@ impl EditorPanes {
                     height as f64,
                     &final_buffer,
                     &final_adjustment,
+                    Some(&symbols_in_minimap),
+                    Some(&final_warning_markers),
                 );
             });
         }
@@ -331,6 +341,8 @@ impl EditorPanes {
                     height as f64,
                     &raw_buffer,
                     &raw_adjustment,
+                    None,
+                    None,
                 );
             });
         }
@@ -420,6 +432,8 @@ impl EditorPanes {
             final_minimap,
             raw_minimap,
             empty_line_pattern_enabled,
+            symbols_in_minimap,
+            final_warning_markers,
         };
 
         refresh_editor_minimap_visibility(
@@ -588,6 +602,8 @@ fn draw_editor_minimap(
     height: f64,
     buffer: &gtk::TextBuffer,
     adjustment: &gtk::Adjustment,
+    symbols_in_minimap: Option<&Rc<Cell<bool>>>,
+    final_warning_markers: Option<&Rc<RefCell<Vec<RepeatWarning>>>>,
 ) {
     let _ = layer;
     if width <= 0.0 || height <= 0.0 {
@@ -697,6 +713,20 @@ fn draw_editor_minimap(
         (viewport_height - 1.0).max(1.0),
     );
     cr.stroke().ok();
+
+    if symbols_in_minimap
+        .and_then(|enabled| (enabled.get() as bool).then_some(()))
+        .is_some()
+        && final_warning_markers.is_some()
+    {
+        draw_minimap_warning_symbols(
+            cr,
+            width,
+            height,
+            buffer,
+            final_warning_markers.unwrap(),
+        );
+    }
 }
 
 fn draw_editor_minimap_number_labels(
@@ -771,6 +801,48 @@ fn minimap_badge_text_color(red: f64, green: f64, blue: f64) -> (f64, f64, f64) 
     } else {
         (0.96, 0.97, 0.99)
     }
+}
+
+fn draw_minimap_warning_symbols(
+    cr: &gtk::cairo::Context,
+    width: f64,
+    height: f64,
+    buffer: &gtk::TextBuffer,
+    final_warning_markers: &Rc<RefCell<Vec<RepeatWarning>>>,
+) {
+    let text = buffer_text(buffer);
+    let total_lines = text.lines().count().max(1) as f64;
+    let markers = final_warning_markers.borrow();
+    for warning in markers.iter() {
+        let y = ((warning.line_index as f64 + 0.5) / total_lines) * height;
+        let marker_size = 6.0;
+        let x = width - EDITOR_MINIMAP_CONTENT_INSET_PX - marker_size * 1.2;
+        match warning.kind {
+            crate::services::live_highlights::RepeatWarningKind::Skull => {
+                draw_minimap_circle(cr, x, y, marker_size, 1.0, 0.05, 0.08);
+            }
+            crate::services::live_highlights::RepeatWarningKind::Diamond => {
+                draw_minimap_circle(cr, x, y, marker_size, 0.12, 0.93, 0.94);
+            }
+            crate::services::live_highlights::RepeatWarningKind::Triangle => {
+                draw_minimap_circle(cr, x, y, marker_size, 0.95, 0.82, 0.26);
+            }
+        }
+    }
+}
+
+fn draw_minimap_circle(
+    cr: &gtk::cairo::Context,
+    x: f64,
+    y: f64,
+    size: f64,
+    red: f64,
+    green: f64,
+    blue: f64,
+) {
+    cr.set_source_rgba(red, green, blue, 0.9);
+    cr.arc(x, y, size * 0.45, 0.0, std::f64::consts::TAU);
+    cr.fill().ok();
 }
 
 fn set_adjustment_from_minimap_y(adjustment: &gtk::Adjustment, y: f64, height: f64) {

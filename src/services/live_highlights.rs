@@ -18,13 +18,15 @@ pub struct RepeatHighlight {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RepeatWarningKind {
     Skull,
-    Warning,
+    Diamond,
+    Triangle,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RepeatWarning {
     pub range: HighlightRange,
     pub kind: RepeatWarningKind,
+    pub line_index: usize,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -72,6 +74,8 @@ pub fn analyze(raw_text: &str, final_text: &str) -> LiveHighlights {
         .map(|token| token.normalized.clone())
         .collect::<HashSet<_>>();
 
+    let final_section_by_line = line_structure_map(final_text);
+
     LiveHighlights {
         raw: PaneHighlights {
             chains: raw_used_word_ranges(&raw_tokens, &final_words),
@@ -82,7 +86,7 @@ pub fn analyze(raw_text: &str, final_text: &str) -> LiveHighlights {
         final_: PaneHighlights {
             chains: Vec::new(),
             repeats: final_repeated_word_highlights(&final_tokens),
-            warnings: final_repeat_warnings(&final_tokens),
+            warnings: final_repeat_warnings(&final_tokens, &final_section_by_line),
             structures: structure_highlights(final_text),
         },
     }
@@ -219,7 +223,10 @@ fn repeat_ranges_for_tokens(tokens: &[Token], repeated: &HashSet<String>) -> Vec
     highlights
 }
 
-fn final_repeat_warnings(tokens: &[Token]) -> Vec<RepeatWarning> {
+fn final_repeat_warnings(
+    tokens: &[Token],
+    line_section_by_line: &[Option<StructureKind>],
+) -> Vec<RepeatWarning> {
     let mut positions_by_word: HashMap<&str, Vec<usize>> = HashMap::new();
     for (position, token) in tokens.iter().enumerate() {
         positions_by_word
@@ -229,32 +236,58 @@ fn final_repeat_warnings(tokens: &[Token]) -> Vec<RepeatWarning> {
     }
 
     let mut warnings = Vec::new();
-    for positions in positions_by_word
-        .values()
-        .filter(|positions| positions.len() > 1)
-    {
-        let skull_positions = skull_warning_positions(tokens, positions);
-        let adjacent_positions = adjacent_line_warning_positions(tokens, positions);
+    for positions in positions_by_word.values().filter(|positions| positions.len() > 1) {
+        let word_length = tokens[positions[0]].normalized.chars().count();
+        let long_word_positions: HashSet<usize> = if word_length > 5 {
+            positions.iter().copied().collect()
+        } else {
+            HashSet::new()
+        };
+        let verse_positions = positions
+            .iter()
+            .copied()
+            .filter(|&position| {
+                matches!(
+                    line_section_by_line.get(tokens[position].line_index),
+                    Some(Some(StructureKind::Verse))
+                )
+            })
+            .collect::<Vec<_>>();
+        let hook_positions = positions
+            .iter()
+            .copied()
+            .filter(|&position| {
+                matches!(
+                    line_section_by_line.get(tokens[position].line_index),
+                    Some(Some(StructureKind::Hook))
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let skull_positions = consecutive_line_positions(tokens, &verse_positions);
+        let diamond_positions = consecutive_line_positions(tokens, &hook_positions);
 
         for &position in positions {
-            let kind = if skull_positions.contains(&position) {
+            let token = &tokens[position];
+            let warning_kind = if skull_positions.contains(&position) {
                 Some(RepeatWarningKind::Skull)
-            } else if adjacent_positions.contains(&position) {
-                Some(RepeatWarningKind::Warning)
+            } else if diamond_positions.contains(&position) {
+                Some(RepeatWarningKind::Diamond)
+            } else if long_word_positions.contains(&position) {
+                Some(RepeatWarningKind::Triangle)
             } else {
                 None
             };
-            let Some(kind) = kind else {
-                continue;
-            };
-            let token = &tokens[position];
-            warnings.push(RepeatWarning {
-                range: HighlightRange {
-                    start: token.start,
-                    end: token.end,
-                },
-                kind,
-            });
+            if let Some(kind) = warning_kind {
+                warnings.push(RepeatWarning {
+                    range: HighlightRange {
+                        start: token.start,
+                        end: token.end,
+                    },
+                    kind,
+                    line_index: token.line_index,
+                });
+            }
         }
     }
 
@@ -262,42 +295,31 @@ fn final_repeat_warnings(tokens: &[Token]) -> Vec<RepeatWarning> {
     warnings
 }
 
-fn skull_warning_positions(tokens: &[Token], positions: &[usize]) -> HashSet<usize> {
-    let mut marked = HashSet::new();
-    if positions
-        .first()
-        .is_none_or(|position| tokens[*position].normalized.chars().count() < 5)
-    {
-        return marked;
-    }
-
-    for start in 0..positions.len() {
-        for end in (start + 2)..positions.len() {
-            let start_line = tokens[positions[start]].line_index;
-            let end_line = tokens[positions[end]].line_index;
-            if end_line.saturating_sub(start_line) > 3 {
-                break;
-            }
-            for &position in &positions[start..=end] {
-                marked.insert(position);
-            }
-        }
-    }
-    marked
-}
-
-fn adjacent_line_warning_positions(tokens: &[Token], positions: &[usize]) -> HashSet<usize> {
-    let mut marked = HashSet::new();
-    for (local_index, &position) in positions.iter().enumerate() {
+fn consecutive_line_positions(tokens: &[Token], positions: &[usize]) -> HashSet<usize> {
+    let mut positions_by_line: HashMap<usize, Vec<usize>> = HashMap::new();
+    for &position in positions {
         let line_index = tokens[position].line_index;
-        if positions.iter().enumerate().any(|(other_index, &other)| {
-            other_index != local_index && tokens[other].line_index.abs_diff(line_index) == 1
-        }) {
-            marked.insert(position);
+        positions_by_line.entry(line_index).or_default().push(position);
+    }
+
+    let mut marked = HashSet::new();
+    let mut sorted_lines = positions_by_line.keys().copied().collect::<Vec<_>>();
+    sorted_lines.sort_unstable();
+
+    for window in sorted_lines.windows(2) {
+        if window[1] == window[0] + 1 {
+            if let Some(first_positions) = positions_by_line.get(&window[0]) {
+                if let Some(second_positions) = positions_by_line.get(&window[1]) {
+                    marked.extend(first_positions);
+                    marked.extend(second_positions);
+                }
+            }
         }
     }
+
     marked
 }
+
 
 fn nearest_distance(positions: &[usize], local_index: usize) -> Option<usize> {
     if positions.len() < 2 {
@@ -335,6 +357,32 @@ fn repeat_bucket(distance: Option<usize>) -> usize {
 struct StructureTag {
     kind: StructureKind,
     start: usize,
+}
+
+fn line_structure_map(text: &str) -> Vec<Option<StructureKind>> {
+    let tags = structure_tags(text);
+    let mut line_offsets = vec![0];
+    for (index, ch) in text.chars().enumerate() {
+        if ch == '\n' {
+            line_offsets.push(index + 1);
+        }
+    }
+
+    let mut result = Vec::with_capacity(line_offsets.len());
+    let mut current_kind = None;
+    let mut next_tag_index = 0;
+    for start in line_offsets {
+        while let Some(tag) = tags.get(next_tag_index) {
+            if tag.start <= start {
+                current_kind = Some(tag.kind);
+                next_tag_index += 1;
+            } else {
+                break;
+            }
+        }
+        result.push(current_kind);
+    }
+    result
 }
 
 fn structure_highlights(text: &str) -> Vec<StructureHighlight> {
@@ -422,7 +470,7 @@ fn parse_structure_kind(label: &str) -> Option<StructureKind> {
         .to_lowercase();
     match normalized.as_str() {
         "intro" => Some(StructureKind::Intro),
-        "hook" => Some(StructureKind::Hook),
+        "hook" | "chorus" => Some(StructureKind::Hook),
         "outro" => Some(StructureKind::Outro),
         _ => parse_numbered_structure(&normalized, "verse", StructureKind::Verse)
             .or_else(|| parse_numbered_structure(&normalized, "hook", StructureKind::Hook)),

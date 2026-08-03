@@ -1,7 +1,9 @@
 use crate::services::live_highlights::{
-    PaneHighlights, REPEAT_BUCKETS, RepeatWarning, STRUCTURE_BUCKETS, StructureKind, analyze,
+    PaneHighlights, REPEAT_BUCKETS, RepeatWarning, RepeatWarningKind, STRUCTURE_BUCKETS,
+    StructureKind, analyze,
 };
 use gtk::prelude::*;
+use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
@@ -25,6 +27,8 @@ struct WarningMarkerAnchor {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum WarningMarkerSymbol {
     Skull,
+    Diamond,
+    Triangle,
 }
 
 pub fn apply(
@@ -35,14 +39,16 @@ pub fn apply(
     show_empty_line_pattern: bool,
     raw_text: &str,
     final_text: &str,
+    final_warning_markers: &Rc<RefCell<Vec<RepeatWarning>>>,
 ) {
     let highlights = analyze(raw_text, final_text);
     apply_to_buffer(raw_buffer, &highlights.raw);
     apply_to_buffer(final_buffer, &highlights.final_);
+    *final_warning_markers.borrow_mut() = highlights.final_.warnings.clone();
     apply_warning_layer(
         final_warning_layer,
         final_view,
-        highlights.final_.warnings.clone(),
+        highlights.final_.warnings,
         show_empty_line_pattern,
     );
 }
@@ -333,12 +339,22 @@ fn draw_warning_markers(
             WarningMarkerSymbol::Skull => {
                 draw_polygon_skull(cr, x, anchor.center_y, WARNING_ICON_SIZE)
             }
+            WarningMarkerSymbol::Diamond => {
+                draw_polygon_diamond(cr, x, anchor.center_y, WARNING_ICON_SIZE)
+            }
+            WarningMarkerSymbol::Triangle => {
+                draw_polygon_triangle(cr, x, anchor.center_y, WARNING_ICON_SIZE)
+            }
         }
     }
 }
 
-fn warning_marker_symbol(_warning: &RepeatWarning) -> WarningMarkerSymbol {
-    WarningMarkerSymbol::Skull
+fn warning_marker_symbol(warning: &RepeatWarning) -> WarningMarkerSymbol {
+    match warning.kind {
+        RepeatWarningKind::Skull => WarningMarkerSymbol::Skull,
+        RepeatWarningKind::Diamond => WarningMarkerSymbol::Diamond,
+        RepeatWarningKind::Triangle => WarningMarkerSymbol::Triangle,
+    }
 }
 
 fn warning_anchor(
@@ -476,6 +492,25 @@ fn draw_polygon_skull(cr: &gtk::cairo::Context, x: f64, y: f64, size: f64) {
         cr.line_to(x + size * offset, y + size * 0.58);
     }
     cr.stroke().ok();
+}
+
+fn draw_polygon_diamond(cr: &gtk::cairo::Context, x: f64, y: f64, size: f64) {
+    cr.set_source_rgba(0.12, 0.93, 0.94, 0.90);
+    cr.move_to(x, y - size * 0.45);
+    cr.line_to(x + size * 0.35, y);
+    cr.line_to(x, y + size * 0.45);
+    cr.line_to(x - size * 0.35, y);
+    cr.close_path();
+    cr.fill().ok();
+}
+
+fn draw_polygon_triangle(cr: &gtk::cairo::Context, x: f64, y: f64, size: f64) {
+    cr.set_source_rgba(0.95, 0.82, 0.26, 0.90);
+    cr.move_to(x, y - size * 0.48);
+    cr.line_to(x + size * 0.42, y + size * 0.34);
+    cr.line_to(x - size * 0.42, y + size * 0.34);
+    cr.close_path();
+    cr.fill().ok();
 }
 
 #[cfg(test)]
