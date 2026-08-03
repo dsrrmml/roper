@@ -12,6 +12,7 @@ use crate::persistence::track_store::{
 use crate::services::artwork::{import_track_artwork, preferred_track_artwork_in_working_directory};
 use crate::services::casing::apply_casing;
 use crate::services::live_highlights::{STRUCTURE_BUCKETS, StructureKind, structure_sequence};
+use crate::ui::raw_gutter::NUMBER_LANE_WIDTH;
 use crate::services::material_usage::{
     add_used_material, effective_used_material, material_from_identity, raw_line_identities,
     remove_used_material,
@@ -230,6 +231,12 @@ pub fn show_in_window(window: &gtk::ApplicationWindow, artist: Artist) {
     let editors = Rc::new(EditorPanes::new(app_settings.font_size_pt));
     editors.empty_line_pattern_enabled.set(app_settings.empty_line_pattern);
     editors.symbols_in_minimap.set(app_settings.symbols_in_minimap);
+    editors.line_numbers_enabled.set(app_settings.show_line_numbers);
+    // Apply initial visibility and left-margin based on setting
+    editors.final_gutter.set_visible(app_settings.show_line_numbers);
+    editors
+        .final_view
+        .set_left_margin(if app_settings.show_line_numbers { NUMBER_LANE_WIDTH } else { 8 });
     editors.set_track_connection(false);
     let root_overlay = gtk::Overlay::new();
     root_overlay.set_hexpand(true);
@@ -4259,10 +4266,16 @@ fn show_settings_tab(
     let symbols_in_minimap_enabled = state.borrow().app_settings.symbols_in_minimap;
     let symbols_in_minimap_toggle = settings_icon_toggle_button(symbols_in_minimap_enabled);
     symbols_in_minimap_toggle.set_halign(gtk::Align::End);
+    let show_line_numbers_enabled = state.borrow().app_settings.show_line_numbers;
+    let show_line_numbers_toggle = settings_icon_toggle_button(show_line_numbers_enabled);
+    show_line_numbers_toggle.set_halign(gtk::Align::End);
 
     overlay
         .settings_box
         .append(&settings_row("empty lines pattern", &empty_line_pattern_toggle));
+    overlay
+        .settings_box
+        .append(&settings_row("show line numbers", &show_line_numbers_toggle));
     overlay
         .settings_box
         .append(&settings_row("symbols in minimap", &symbols_in_minimap_toggle));
@@ -4339,6 +4352,32 @@ fn show_settings_tab(
             }
             editors.symbols_in_minimap.set(enabled);
             editors.final_minimap.queue_draw();
+        });
+    }
+
+    {
+        let state = state.clone();
+        let notice = notice.clone();
+        let editors = editors.clone();
+        let show_line_numbers_state = Rc::new(Cell::new(show_line_numbers_enabled));
+        let show_line_numbers_state_for_click = show_line_numbers_state.clone();
+        let show_line_numbers_toggle_for_click = show_line_numbers_toggle.clone();
+        show_line_numbers_toggle.connect_clicked(move |_| {
+            let enabled = !show_line_numbers_state_for_click.get();
+            show_line_numbers_state_for_click.set(enabled);
+            set_settings_toggle_icon(&show_line_numbers_toggle_for_click, enabled);
+            {
+                let mut state_ref = state.borrow_mut();
+                state_ref.app_settings.show_line_numbers = enabled;
+                if let Err(err) = state_ref.settings_store.save(&state_ref.app_settings) {
+                    notifications::show_error(&notice, err.to_string());
+                }
+            }
+            editors.line_numbers_enabled.set(enabled);
+            editors.final_gutter.set_visible(enabled);
+            editors.final_view.set_left_margin(if enabled { NUMBER_LANE_WIDTH } else { 8 });
+            editors.final_view.queue_draw();
+            editors.final_gutter.queue_draw();
         });
     }
 

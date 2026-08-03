@@ -55,6 +55,7 @@ pub struct EditorPanes {
     pub raw_minimap: gtk::DrawingArea,
     pub empty_line_pattern_enabled: Rc<Cell<bool>>,
     pub symbols_in_minimap: Rc<Cell<bool>>,
+    pub line_numbers_enabled: Rc<Cell<bool>>,
     pub final_warning_markers: Rc<RefCell<Vec<RepeatWarning>>>,
 }
 
@@ -180,6 +181,7 @@ impl EditorPanes {
         raw_gutter.set_vexpand(true);
 
         let symbols_in_minimap = Rc::new(Cell::new(false));
+        let line_numbers_enabled = Rc::new(Cell::new(true));
         let final_warning_markers = Rc::new(RefCell::new(Vec::new()));
 
         let raw_minimap = gtk::DrawingArea::new();
@@ -433,6 +435,7 @@ impl EditorPanes {
             raw_minimap,
             empty_line_pattern_enabled,
             symbols_in_minimap,
+            line_numbers_enabled,
             final_warning_markers,
         };
 

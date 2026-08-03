@@ -73,6 +73,8 @@ pub struct AppSettings {
     pub empty_line_pattern: bool,
     #[serde(default)]
     pub symbols_in_minimap: bool,
+    #[serde(default = "default_show_line_numbers")]
+    pub show_line_numbers: bool,
     pub default_casing_mode: CasingMode,
     #[serde(default)]
     pub start_behavior: StartBehavior,
@@ -92,6 +94,7 @@ impl Default for AppSettings {
             fullscreen: true,
             empty_line_pattern: false,
             symbols_in_minimap: false,
+            show_line_numbers: true,
             default_casing_mode: CasingMode::Preserve,
             start_behavior: StartBehavior::default(),
             last_workspace_mode: default_workspace_mode(),
@@ -103,6 +106,10 @@ impl Default for AppSettings {
 
 fn default_workspace_mode() -> String {
     "tracks".to_owned()
+}
+
+fn default_show_line_numbers() -> bool {
+    true
 }
 
 pub struct SettingsStore {
