@@ -4,7 +4,7 @@ ROPER is a native RUST/GTK4 desktop app for Linux (tested on Debian Trixie) focu
 
 This documentation covers:
 
-- WHY I HAVE BUILT IT
+- WHY IT WAS BUILT
 - PRACTICAL WORKFLOW
 - HOW HIGHLIGHTING WORKS
 - FEATURES
@@ -16,7 +16,7 @@ This documentation covers:
 
 ---
 
-## WHY I HAVE BUILT IT
+## WHY IT WAS BUILT
 
 I needed a distractionless (yeah, even breathing distracts me) editor
 for developing text ideas over time to final lyrics for various projects.
