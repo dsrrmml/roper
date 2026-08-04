@@ -143,10 +143,13 @@ impl IdeasWorkspace {
         let word_bubble = stat_bubble("W 0");
         let char_bubble = stat_bubble("C 0");
         line_bubble.set_size_request(-1, 36);
+        line_bubble.add_css_class("ideas-stat-bubbles");
         line_bubble.set_valign(gtk::Align::Fill);
         word_bubble.set_size_request(-1, 36);
+        word_bubble.add_css_class("ideas-stat-bubbles");
         word_bubble.set_valign(gtk::Align::Fill);
         char_bubble.set_size_request(-1, 36);
+        char_bubble.add_css_class("ideas-stat-bubbles");
         char_bubble.set_valign(gtk::Align::Fill);
 
         let transfer_button = icon_text_button("transfer.svg", "TRANSFER");

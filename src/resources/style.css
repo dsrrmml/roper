@@ -55,25 +55,23 @@ textview {
 }
 
 .final-editor-view {
-  background: transparent;
-  /* remove the default editor padding on the left so the gutter
-     can sit flush against the pane border; keep other paddings */
-  padding: 12px 12px 12px 0px;
+  padding: 12px 12px 12px 12px;
+  background: rgba(14, 17, 20, 1);
 }
 
 .final-editor-view text {
-  background: rgba(14, 17, 20, 0.78);
+  background: rgba(14, 17, 20, 1);
   color: #f5f5f0;
 }
 
 .final-scrolled,
 .final-scrolled viewport,
 .final-editor-view {
-  background: transparent;
+    background: transparent;
 }
 
 .editor-view text {
-  background: rgba(14, 17, 20, 0.78);
+  background: transparent;
   color: #f5f5f0;
 }
 
@@ -87,7 +85,7 @@ textview {
 }
 
 .pane-shell {
-  background: #0f1115;
+  background: rgba(14, 17, 20, 0.8);
   border-right: 1px solid #2c323a;
 }
 
@@ -95,8 +93,7 @@ textview {
   min-width: 20px;
   margin: 0;
   padding: 0;
-  /* Match the toolbar/top-bar background (#191821) at 40% opacity */
-  background: rgba(25, 24, 33, 0.40);
+  background: rgba(25, 24, 33, 0.65);
 }
 .raw-gutter {
   min-width: 0px;
@@ -109,7 +106,7 @@ textview {
   min-width: 56px;
   padding: 0;
   border: none;
-  background: rgba(9, 12, 16, 0.82);
+  background: rgba(9, 12, 16, 0.65);
 }
 
 .final-warning-layer {
@@ -954,8 +951,8 @@ textview {
 }
 
 .font-size-combo {
-  min-height: 36px;
   font-size: 11pt;
+  line-height: 11pt;
 }
 
 .current-track-name {
@@ -964,6 +961,9 @@ textview {
   font-weight: 500;
 }
 
+.ideas-stat-bubbles {
+  padding: 2px 8px;
+}
 .editor-stat-bubbles {
   background: transparent;
 }
@@ -1338,7 +1338,7 @@ textview {
 }
 
 .info-view {
-  background: #101216;
+  background: #000000;
   min-width: 1px;
   min-height: 1px;
   padding: 0;
@@ -1347,6 +1347,7 @@ textview {
 .info-viewport {
   min-width: 1px;
   min-height: 1px;
+  background: #000000;
 }
 
 .info-header {
@@ -1360,12 +1361,16 @@ textview {
 .info-splash-image {
   min-width: 320px;
   min-height: 200px;
-  background: #07090c;
+  background: #000000;
   border-radius: 0;
 }
 
+.info-splash-frame {
+  background: rgba(0, 0, 0, 0.0);
+}
+
 .info-splash-shade {
-  background: rgba(0, 0, 0, 0.24);
+  background: rgba(0, 0, 0, 0);
 }
 
 .info-title {
@@ -1381,11 +1386,11 @@ textview {
 }
 
 .info-chip-row {
-  background: transparent;
+  background: #000000;
 }
 
 .info-chip {
-  background: rgba(151, 176, 203, 0.16);
+  background: #000000;
   color: rgba(237, 241, 244, 0.88);
   border-radius: 0;
   padding: 5px 8px;
@@ -1398,7 +1403,7 @@ textview {
 }
 
 .info-section {
-  background: rgba(255, 255, 255, 0.038);
+  background: transparent;
   border-radius: 0;
   border-bottom: 1px solid #303842;
   padding: 12px 14px;
@@ -1439,23 +1444,6 @@ textview {
 .info-footer {
   background: transparent;
   padding: 2px 0 0 0;
-}
-
-.info-easter-word {
-  background: transparent;
-  color: #edf1f4;
-  border: none;
-  box-shadow: none;
-  padding: 0;
-  font-size: 12pt;
-  font-weight: 700;
-}
-
-.info-easter-word:hover {
-  background: transparent;
-  border: none;
-  box-shadow: none;
-  color: #ffffff;
 }
 
 .credits-easteregg {

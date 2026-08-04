@@ -236,7 +236,7 @@ pub fn show_in_window(window: &gtk::ApplicationWindow, artist: Artist) {
     editors.final_gutter.set_visible(app_settings.show_line_numbers);
     editors
         .final_view
-        .set_left_margin(if app_settings.show_line_numbers { NUMBER_LANE_WIDTH } else { 8 });
+        .set_left_margin(if app_settings.show_line_numbers { NUMBER_LANE_WIDTH } else { 0 }); // was 8
     editors.set_track_connection(false);
     let root_overlay = gtk::Overlay::new();
     root_overlay.set_hexpand(true);
@@ -4544,7 +4544,7 @@ fn info_splash_preview(root_overlay: &gtk::Overlay) -> gtk::Widget {
     let frame = gtk::Overlay::new();
     frame.add_css_class("info-splash-frame");
     frame.set_size_request(INFO_SPLASH_PREVIEW_WIDTH, INFO_SPLASH_PREVIEW_HEIGHT);
-    frame.set_hexpand(true);
+    frame.set_hexpand(false);
     frame.set_vexpand(false);
     frame.set_halign(gtk::Align::Fill);
     frame.set_valign(gtk::Align::Start);

@@ -107,7 +107,7 @@ fn ensure_chain_tag(buffer: &gtk::TextBuffer) -> gtk::TextTag {
     }
 
     let tag = gtk::TextTag::builder().name(CHAIN_TAG).build();
-    tag.set_background_rgba(Some(&gtk::gdk::RGBA::new(1.0, 0.48, 0.0, 0.28)));
+    tag.set_background_rgba(Some(&gtk::gdk::RGBA::new(1.0, 0.48, 0.0, 0.25)));
     table.add(&tag);
     tag
 }

@@ -70,7 +70,7 @@ impl EditorPanes {
 
         let final_view = build_text_view(&final_buffer);
         final_view.add_css_class("final-editor-view");
-        final_view.set_left_margin(NUMBER_LANE_WIDTH);
+        final_view.set_left_margin(0); // was NUMBER_LANE_WIDTH
         final_view.set_right_margin(FINAL_WARNING_MARGIN_PX);
         let empty_line_pattern_enabled = Rc::new(Cell::new(false));
         let raw_view = build_text_view(&raw_buffer);
@@ -112,7 +112,7 @@ impl EditorPanes {
                 let run = height / slope;
                 let mut x = -run;
 
-                cr.set_source_rgba(1.0, 1.0, 1.0, 0.18);
+                cr.set_source_rgba(1.0, 1.0, 1.0, 0.12);
                 cr.set_line_width(1.6);
                 cr.set_line_cap(gtk::cairo::LineCap::Round);
 
