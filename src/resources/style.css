@@ -650,6 +650,22 @@ textview {
   background: #2a3038;
 }
 
+.ideas-view-back-button,
+.ideas-view-back-button:hover,
+.ideas-view-back-button:focus,
+.ideas-view-back-button:focus-visible,
+.ideas-view-back-button:focus-within {
+  min-width: 36px;
+  min-height: 36px;
+  max-width: 36px;
+  max-height: 36px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
 .slide-panel.ideas-transfer-panel .ideas-toolbar-button,
 .slide-panel.ideas-transfer-panel .ideas-toolbar-button:hover,
 .slide-panel.ideas-manager-panel .ideas-toolbar-button,

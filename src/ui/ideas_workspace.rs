@@ -160,13 +160,12 @@ impl IdeasWorkspace {
         transfer_button.add_css_class("toolbar-control");
         transfer_button.set_size_request(-1, 36);
 
-        let leave_button = icon_button("menu.svg", "OPEN MENU");
-        leave_button.add_css_class("secondary-button");
-        leave_button.add_css_class("ideas-toolbar-button");
-        leave_button.add_css_class("ideas-toolbar-right-button");
-        leave_button.add_css_class("toolbar-control");
+        let leave_button = icon_button("close.svg", "Back to menu");
         leave_button.add_css_class("back-action-button");
+        leave_button.add_css_class("ideas-view-back-button");
         leave_button.set_size_request(36, 36);
+        leave_button.set_halign(gtk::Align::End);
+        leave_button.set_valign(gtk::Align::Start);
 
         let manager_button = icon_text_button("batch-prediction.svg", "MANAGE");
         manager_button.add_css_class("secondary-button");
@@ -191,7 +190,6 @@ impl IdeasWorkspace {
         toolbar.append(&spacer);
         toolbar.append(&transfer_button);
         toolbar.append(&manager_button);
-        toolbar.append(&leave_button);
 
         let search_revealer = gtk::Revealer::new();
         search_revealer.set_transition_type(gtk::RevealerTransitionType::SlideDown);
@@ -232,6 +230,7 @@ impl IdeasWorkspace {
         layout.append(&notice);
         layout.append(&toolbar);
         root.set_child(Some(&layout));
+        root.add_overlay(&leave_button);
 
         let manager_revealer = gtk::Revealer::new();
         manager_revealer.set_transition_type(gtk::RevealerTransitionType::SlideLeft);
@@ -398,9 +397,7 @@ impl IdeasWorkspace {
 
     pub fn bind_ideas_tab_label(&self, label: &gtk::Label) {
         self.ideas_tab_label.replace(Some(label.clone()));
-        if let Some(current) = self.state.borrow().current.as_ref() {
-            self.update_ideas_tab_label(current.settings.updated_unix);
-        }
+        self.update_ideas_tab_label();
     }
 
     pub fn focus_verses(&self) {
@@ -823,12 +820,27 @@ impl IdeasWorkspace {
         self.update_ideas_structure_tool();
         self.idea_pane_title
             .set_text(&idea_snapshot_display_name(&snapshot));
-        self.update_ideas_tab_label(snapshot.settings.updated_unix);
+        self.update_ideas_tab_label();
     }
 
-    fn update_ideas_tab_label(&self, updated_unix: u64) {
+    fn update_ideas_tab_label(&self) {
         if let Some(label) = self.ideas_tab_label.borrow().as_ref() {
-            label.set_text(&format_idea_datetime(updated_unix));
+            let title = {
+                let state = self.state.borrow();
+                state
+                    .current
+                    .as_ref()
+                    .map(|current| {
+                        idea_display_name_for_text(
+                            &current.settings,
+                            &buffer_text(&self.in_out_buffer),
+                            &buffer_text(&self.verses_buffer),
+                            &buffer_text(&self.hooks_buffer),
+                        )
+                    })
+                    .unwrap_or_else(|| "IDEAS".to_owned())
+            };
+            label.set_text(&title);
         }
     }
 
@@ -891,7 +903,6 @@ impl IdeasWorkspace {
         match result {
             Ok(()) => {
                 let is_stored_as_idea = !settings.name.trim().is_empty();
-                let updated_unix = settings.updated_unix;
                 {
                     let mut state = self.state.borrow_mut();
                     if let Some(current) = state.current.as_mut() {
@@ -901,7 +912,7 @@ impl IdeasWorkspace {
                     state.is_stored_as_idea = is_stored_as_idea;
                 }
                 self.update_idea_pane_title();
-                self.update_ideas_tab_label(updated_unix);
+                self.update_ideas_tab_label();
                 notifications::clear(&self.notice);
                 if self.manager_revealer.reveals_child() || was_stored_as_idea != is_stored_as_idea
                 {
@@ -1326,7 +1337,7 @@ impl IdeasWorkspace {
                             }
                         }
                         self.update_idea_pane_title();
-                        self.update_ideas_tab_label(snapshot.settings.updated_unix);
+                        self.update_ideas_tab_label();
                         self.refresh_manager();
                         notifications::clear(&self.notice);
                     }
