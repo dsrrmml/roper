@@ -1,6 +1,6 @@
 use crate::services::live_highlights::{
-    PaneHighlights, REPEAT_BUCKETS, RepeatWarning, RepeatWarningKind, STRUCTURE_BUCKETS,
-    StructureKind, analyze,
+    LiveHighlights, PaneHighlights, REPEAT_BUCKETS, RepeatWarning, RepeatWarningKind,
+    STRUCTURE_BUCKETS, StructureKind,
 };
 use gtk::prelude::*;
 use std::cell::RefCell;
@@ -29,6 +29,9 @@ enum WarningMarkerSymbol {
     Skull,
     Diamond,
     Triangle,
+    Orange,
+    Violet,
+    Gray,
 }
 
 pub fn apply(
@@ -41,16 +44,64 @@ pub fn apply(
     final_text: &str,
     final_warning_markers: &Rc<RefCell<Vec<RepeatWarning>>>,
 ) {
-    let highlights = analyze(raw_text, final_text);
+    let highlights = crate::services::live_highlights::analyze(raw_text, final_text);
+    apply_highlights(
+        raw_buffer,
+        final_buffer,
+        final_view,
+        final_warning_layer,
+        show_empty_line_pattern,
+        &highlights,
+        final_warning_markers,
+    );
+}
+
+pub fn apply_highlights(
+    raw_buffer: &gtk::TextBuffer,
+    final_buffer: &gtk::TextBuffer,
+    final_view: &gtk::TextView,
+    final_warning_layer: &gtk::DrawingArea,
+    show_empty_line_pattern: bool,
+    highlights: &LiveHighlights,
+    final_warning_markers: &Rc<RefCell<Vec<RepeatWarning>>>,
+) {
     apply_to_buffer(raw_buffer, &highlights.raw);
     apply_to_buffer(final_buffer, &highlights.final_);
     *final_warning_markers.borrow_mut() = highlights.final_.warnings.clone();
+    final_warning_layer.set_tooltip_text(warning_summary(&highlights.final_.warnings).as_deref());
     apply_warning_layer(
         final_warning_layer,
         final_view,
-        highlights.final_.warnings,
+        highlights.final_.warnings.clone(),
         show_empty_line_pattern,
     );
+}
+
+fn warning_summary(warnings: &[RepeatWarning]) -> Option<String> {
+    if warnings.is_empty() {
+        return None;
+    }
+    let mut by_kind: HashMap<&'static str, usize> = HashMap::new();
+    for warning in warnings {
+        *by_kind.entry(warning_kind_label(warning.kind)).or_default() += 1;
+    }
+    let mut parts = by_kind
+        .into_iter()
+        .map(|(label, count)| format!("{label}: {count}"))
+        .collect::<Vec<_>>();
+    parts.sort();
+    Some(parts.join("\n"))
+}
+
+fn warning_kind_label(kind: RepeatWarningKind) -> &'static str {
+    match kind {
+        RepeatWarningKind::ScatteredWeakWord => "scattered weak word",
+        RepeatWarningKind::AdjacentRepetition => "adjacent repetition",
+        RepeatWarningKind::HookRepetition => "hook repetition",
+        RepeatWarningKind::WordFamilyEcho => "word family echo",
+        RepeatWarningKind::PhraseEcho => "phrase echo",
+        RepeatWarningKind::RepeatedLine => "repeated line",
+    }
 }
 
 fn apply_to_buffer(buffer: &gtk::TextBuffer, highlights: &PaneHighlights) {
@@ -315,9 +366,21 @@ fn draw_warning_markers(
     final_view: &gtk::TextView,
     warnings: &[RepeatWarning],
 ) {
-    let mut fallback_slots_by_line = HashMap::new();
-
+    let mut primary_by_line: HashMap<usize, (RepeatWarning, usize)> = HashMap::new();
     for warning in warnings {
+        primary_by_line
+            .entry(warning.line_index)
+            .and_modify(|(current, count)| {
+                *count += 1;
+                if warning_severity(warning) > warning_severity(current) {
+                    *current = warning.clone();
+                }
+            })
+            .or_insert_with(|| (warning.clone(), 1));
+    }
+
+    let mut fallback_slots_by_line = HashMap::new();
+    for (warning, count) in primary_by_line.values() {
         let Some(anchor) = warning_anchor(layer, final_view, warning) else {
             continue;
         };
@@ -345,16 +408,58 @@ fn draw_warning_markers(
             WarningMarkerSymbol::Triangle => {
                 draw_polygon_triangle(cr, x, anchor.center_y, WARNING_ICON_SIZE)
             }
+            WarningMarkerSymbol::Orange => {
+                draw_marker_circle(cr, x, anchor.center_y, WARNING_ICON_SIZE, 1.0, 0.48, 0.0)
+            }
+            WarningMarkerSymbol::Violet => {
+                draw_marker_circle(cr, x, anchor.center_y, WARNING_ICON_SIZE, 0.64, 0.36, 1.0)
+            }
+            WarningMarkerSymbol::Gray => {
+                draw_marker_circle(cr, x, anchor.center_y, WARNING_ICON_SIZE, 0.58, 0.60, 0.64)
+            }
+        }
+        if *count > 1 {
+            draw_warning_count_badge(cr, x + WARNING_ICON_SIZE * 0.62, anchor.center_y, *count);
         }
     }
 }
 
 fn warning_marker_symbol(warning: &RepeatWarning) -> WarningMarkerSymbol {
     match warning.kind {
-        RepeatWarningKind::Skull => WarningMarkerSymbol::Skull,
-        RepeatWarningKind::Diamond => WarningMarkerSymbol::Diamond,
-        RepeatWarningKind::Triangle => WarningMarkerSymbol::Triangle,
+        RepeatWarningKind::ScatteredWeakWord => WarningMarkerSymbol::Skull,
+        RepeatWarningKind::AdjacentRepetition => WarningMarkerSymbol::Triangle,
+        RepeatWarningKind::HookRepetition => WarningMarkerSymbol::Diamond,
+        RepeatWarningKind::WordFamilyEcho => WarningMarkerSymbol::Orange,
+        RepeatWarningKind::PhraseEcho => WarningMarkerSymbol::Violet,
+        RepeatWarningKind::RepeatedLine => WarningMarkerSymbol::Gray,
     }
+}
+
+fn warning_severity(warning: &RepeatWarning) -> usize {
+    match warning.kind {
+        RepeatWarningKind::ScatteredWeakWord => 6,
+        RepeatWarningKind::AdjacentRepetition => 5,
+        RepeatWarningKind::HookRepetition => 4,
+        RepeatWarningKind::WordFamilyEcho => 3,
+        RepeatWarningKind::PhraseEcho => 2,
+        RepeatWarningKind::RepeatedLine => 1,
+    }
+}
+
+fn draw_warning_count_badge(cr: &gtk::cairo::Context, x: f64, y: f64, count: usize) {
+    let label = count.min(9).to_string();
+    cr.set_source_rgba(0.08, 0.09, 0.11, 0.92);
+    cr.arc(x, y - 5.0, 5.0, 0.0, std::f64::consts::TAU);
+    cr.fill().ok();
+    cr.set_source_rgba(0.96, 0.97, 0.99, 0.96);
+    cr.select_font_face(
+        "Sans",
+        gtk::cairo::FontSlant::Normal,
+        gtk::cairo::FontWeight::Bold,
+    );
+    cr.set_font_size(7.0);
+    cr.move_to(x - 2.0, y - 2.4);
+    cr.show_text(&label).ok();
 }
 
 fn warning_anchor(
@@ -494,6 +599,20 @@ fn draw_polygon_skull(cr: &gtk::cairo::Context, x: f64, y: f64, size: f64) {
     cr.stroke().ok();
 }
 
+fn draw_marker_circle(
+    cr: &gtk::cairo::Context,
+    x: f64,
+    y: f64,
+    size: f64,
+    red: f64,
+    green: f64,
+    blue: f64,
+) {
+    cr.set_source_rgba(red, green, blue, 0.92);
+    cr.arc(x, y, size * 0.44, 0.0, std::f64::consts::TAU);
+    cr.fill().ok();
+}
+
 fn draw_polygon_diamond(cr: &gtk::cairo::Context, x: f64, y: f64, size: f64) {
     cr.set_source_rgba(0.12, 0.93, 0.94, 0.90);
     cr.move_to(x, y - size * 0.45);
@@ -566,14 +685,34 @@ mod tests {
     }
 
     #[test]
-    fn final_redundancy_warnings_are_always_rendered_as_skulls() {
-        for kind in [RepeatWarningKind::Warning, RepeatWarningKind::Skull] {
+    fn final_redundancy_warnings_render_matching_symbols() {
+        for (kind, symbol) in [
+            (
+                RepeatWarningKind::ScatteredWeakWord,
+                WarningMarkerSymbol::Skull,
+            ),
+            (
+                RepeatWarningKind::AdjacentRepetition,
+                WarningMarkerSymbol::Triangle,
+            ),
+            (
+                RepeatWarningKind::HookRepetition,
+                WarningMarkerSymbol::Diamond,
+            ),
+            (
+                RepeatWarningKind::WordFamilyEcho,
+                WarningMarkerSymbol::Orange,
+            ),
+            (RepeatWarningKind::PhraseEcho, WarningMarkerSymbol::Violet),
+            (RepeatWarningKind::RepeatedLine, WarningMarkerSymbol::Gray),
+        ] {
             let warning = RepeatWarning {
                 range: HighlightRange { start: 0, end: 5 },
                 kind,
+                line_index: 0,
             };
 
-            assert_eq!(warning_marker_symbol(&warning), WarningMarkerSymbol::Skull);
+            assert_eq!(warning_marker_symbol(&warning), symbol);
         }
     }
 }

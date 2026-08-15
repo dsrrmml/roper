@@ -79,6 +79,7 @@ pub struct IdeasWorkspace {
     transfer_content: gtk::Box,
     transfer_complete_handler: TransferCompleteHandler,
     ideas_tab_label: RefCell<Option<gtk::Label>>,
+    idea_pane_title: gtk::Label,
 }
 
 struct IdeasState {
@@ -215,9 +216,8 @@ impl IdeasWorkspace {
         let panes = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         panes.set_hexpand(true);
         panes.set_vexpand(true);
-        panes.append(&idea_pane_shell("IN/OUT", &in_out_view));
-        panes.append(&idea_pane_shell("VERSES", &verses_view));
-        panes.append(&idea_pane_shell("HOOKS/BRIDGES", &hooks_view));
+        let (idea_pane, idea_pane_title) = idea_pane_shell("000000-000000", &verses_view);
+        panes.append(&idea_pane);
 
         let notice = gtk::Label::new(None);
         notice.add_css_class("notification");
@@ -383,6 +383,7 @@ impl IdeasWorkspace {
             transfer_content,
             transfer_complete_handler,
             ideas_tab_label,
+            idea_pane_title,
         };
 
         workspace.install_handlers();
@@ -432,6 +433,7 @@ impl IdeasWorkspace {
         }
         self.refresh_stats();
         self.update_ideas_structure_tool();
+        self.update_idea_pane_title();
         self.refresh_name_glow();
         self.refresh_manager();
     }
@@ -753,6 +755,7 @@ impl IdeasWorkspace {
             transfer_content: self.transfer_content.clone(),
             transfer_complete_handler: self.transfer_complete_handler.clone(),
             ideas_tab_label: self.ideas_tab_label.clone(),
+            idea_pane_title: self.idea_pane_title.clone(),
         }
     }
 
@@ -761,12 +764,13 @@ impl IdeasWorkspace {
     }
 
     fn adjust_slide_panel_widths(&self) {
-        let hooks_width = self
-            .hooks_view
+        let panel_width = self
+            .verses_view
             .width()
+            .min(SIDE_PANEL_WIDTH)
             .max((self.root.width() / 3).max(280));
-        self.manager_panel.set_width_request(hooks_width);
-        self.transfer_panel.set_width_request(hooks_width);
+        self.manager_panel.set_width_request(panel_width);
+        self.transfer_panel.set_width_request(panel_width);
     }
 
     fn open_latest_or_create(&self) {
@@ -803,9 +807,13 @@ impl IdeasWorkspace {
                 paths: snapshot.paths.clone(),
             });
         }
-        self.in_out_buffer.set_text(&snapshot.in_out);
-        self.verses_buffer.set_text(&snapshot.verses);
-        self.hooks_buffer.set_text(&snapshot.hooks_bridges);
+        self.in_out_buffer.set_text("");
+        self.verses_buffer.set_text(&compose_plain_idea_text(
+            &snapshot.in_out,
+            &snapshot.verses,
+            &snapshot.hooks_bridges,
+        ));
+        self.hooks_buffer.set_text("");
         {
             let mut state = self.state.borrow_mut();
             state.programmatic_change = false;
@@ -813,6 +821,8 @@ impl IdeasWorkspace {
         }
         self.refresh_stats();
         self.update_ideas_structure_tool();
+        self.idea_pane_title
+            .set_text(&idea_snapshot_display_name(&snapshot));
         self.update_ideas_tab_label(snapshot.settings.updated_unix);
     }
 
@@ -820,6 +830,25 @@ impl IdeasWorkspace {
         if let Some(label) = self.ideas_tab_label.borrow().as_ref() {
             label.set_text(&format_idea_datetime(updated_unix));
         }
+    }
+
+    fn update_idea_pane_title(&self) {
+        let title = {
+            let state = self.state.borrow();
+            state
+                .current
+                .as_ref()
+                .map(|current| {
+                    idea_display_name_for_text(
+                        &current.settings,
+                        &buffer_text(&self.in_out_buffer),
+                        &buffer_text(&self.verses_buffer),
+                        &buffer_text(&self.hooks_buffer),
+                    )
+                })
+                .unwrap_or_else(|| "000000-000000".to_owned())
+        };
+        self.idea_pane_title.set_text(&title);
     }
 
     fn on_text_changed(&self) {
@@ -855,17 +884,14 @@ impl IdeasWorkspace {
         let verses = buffer_text(&self.verses_buffer);
         let hooks = buffer_text(&self.hooks_buffer);
 
-        let result = self.idea_store.save_snapshot(
-            &paths,
-            &mut settings,
-            &in_out,
-            &verses,
-            &hooks,
-        );
+        let result = self
+            .idea_store
+            .save_snapshot(&paths, &mut settings, &in_out, &verses, &hooks);
 
         match result {
             Ok(()) => {
                 let is_stored_as_idea = !settings.name.trim().is_empty();
+                let updated_unix = settings.updated_unix;
                 {
                     let mut state = self.state.borrow_mut();
                     if let Some(current) = state.current.as_mut() {
@@ -874,9 +900,10 @@ impl IdeasWorkspace {
                     state.is_dirty = false;
                     state.is_stored_as_idea = is_stored_as_idea;
                 }
+                self.update_idea_pane_title();
+                self.update_ideas_tab_label(updated_unix);
                 notifications::clear(&self.notice);
-                if self.manager_revealer.reveals_child()
-                    || was_stored_as_idea != is_stored_as_idea
+                if self.manager_revealer.reveals_child() || was_stored_as_idea != is_stored_as_idea
                 {
                     self.refresh_manager();
                 }
@@ -1113,6 +1140,7 @@ impl IdeasWorkspace {
         let shell = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         shell.add_css_class("artist-row");
         shell.add_css_class("ideas-manager-row-shell");
+        shell.set_hexpand(true);
         let is_current = self
             .state
             .borrow()
@@ -1126,13 +1154,17 @@ impl IdeasWorkspace {
 
         let labels = gtk::Box::new(gtk::Orientation::Vertical, 2);
         labels.set_hexpand(true);
+        labels.set_halign(gtk::Align::Fill);
         labels.set_margin_start(12);
-        let dt = gtk::Label::new(Some(&format_idea_datetime(snapshot.settings.updated_unix)));
+        let display_name = idea_snapshot_display_name(&snapshot);
+        let dt = gtk::Label::new(Some(&display_name));
         dt.add_css_class("muted");
         dt.add_css_class("ideas-manager-row-datetime");
+        dt.set_hexpand(true);
+        dt.set_max_width_chars(16);
+        dt.set_ellipsize(gtk::pango::EllipsizeMode::End);
         dt.set_xalign(0.0);
         labels.append(&dt);
-
         let open_button = gtk::Button::new();
         open_button.add_css_class("row-open-button");
         open_button.add_css_class("ideas-manager-open-button");
@@ -1145,9 +1177,29 @@ impl IdeasWorkspace {
         open_button.set_margin_end(0);
         open_button.set_child(Some(&labels));
 
+        let rename_entry = gtk::Entry::builder().text(&display_name).build();
+        rename_entry.add_css_class("form-field");
+        rename_entry.add_css_class("ideas-manager-rename-entry");
+        rename_entry.set_hexpand(true);
+        rename_entry.set_width_chars(12);
+        rename_entry.set_max_width_chars(18);
+        rename_entry.set_margin_start(12);
+        let row_stack = gtk::Stack::new();
+        row_stack.set_hexpand(true);
+        row_stack.set_halign(gtk::Align::Fill);
+        row_stack.set_size_request(1, 72);
+        row_stack.add_named(&open_button, Some("open"));
+        row_stack.add_named(&rename_entry, Some("rename"));
+        row_stack.set_visible_child_name("open");
+
         let actions = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         actions.add_css_class("row-action-stack");
         actions.set_valign(gtk::Align::Center);
+        actions.set_hexpand(false);
+        actions.set_halign(gtk::Align::End);
+        let rename = icon_button("edit.svg", "Rename this idea");
+        rename.add_css_class("row-action-button");
+        rename.set_size_request(72, 72);
         let transfer = icon_button("transfer.svg", "Transfer this idea");
         transfer.add_css_class("row-action-button");
         transfer.set_size_request(72, 72);
@@ -1155,6 +1207,7 @@ impl IdeasWorkspace {
         remove.add_css_class("row-action-button");
         remove.add_css_class("row-remove-button");
         remove.set_size_request(72, 72);
+        actions.append(&rename);
         actions.append(&transfer);
         actions.append(&remove);
 
@@ -1164,6 +1217,49 @@ impl IdeasWorkspace {
             open_button.connect_clicked(move |_| {
                 this.load_idea_into_editor(&id, true);
             });
+        }
+
+        {
+            let entry = rename_entry.clone();
+            let label = dt.clone();
+            let stack = row_stack.clone();
+            rename.connect_clicked(move |_| {
+                entry.set_text(label.text().as_str());
+                stack.set_visible_child_name("rename");
+                entry.grab_focus();
+                entry.select_region(0, -1);
+            });
+        }
+
+        {
+            let this = self.clone_handles();
+            let id = snapshot.settings.id.clone();
+            let label = dt.clone();
+            let stack = row_stack.clone();
+            rename_entry.connect_activate(move |entry| {
+                this.rename_idea_from_entry(&id, entry, &label, &stack);
+            });
+        }
+
+        {
+            let this = self.clone_handles();
+            let id = snapshot.settings.id.clone();
+            let entry = rename_entry.clone();
+            let label = dt.clone();
+            let stack = row_stack.clone();
+            let key = gtk::EventControllerKey::new();
+            key.connect_key_pressed(move |_, keyval, _, _| {
+                if keyval == gtk::gdk::Key::Escape {
+                    stack.set_visible_child_name("open");
+                    return gtk::glib::Propagation::Stop;
+                }
+                if keyval == gtk::gdk::Key::Return || keyval == gtk::gdk::Key::KP_Enter {
+                    this.rename_idea_from_entry(&id, &entry, &label, &stack);
+                    return gtk::glib::Propagation::Stop;
+                }
+                gtk::glib::Propagation::Proceed
+            });
+            rename_entry.add_controller(key);
         }
 
         {
@@ -1191,10 +1287,54 @@ impl IdeasWorkspace {
             });
         }
 
-        shell.append(&open_button);
+        shell.append(&row_stack);
         shell.append(&actions);
         row.set_child(Some(&shell));
         row
+    }
+
+    fn rename_idea_from_entry(
+        &self,
+        id: &str,
+        entry: &gtk::Entry,
+        label: &gtk::Label,
+        stack: &gtk::Stack,
+    ) {
+        let name = entry.text().trim().to_owned();
+        if name.is_empty() {
+            notifications::show_error(&self.notice, "Idea name cannot be empty.");
+            return;
+        }
+
+        match self.idea_store.load_idea(id) {
+            Ok(mut snapshot) => {
+                match self
+                    .idea_store
+                    .update_name(&snapshot.paths, &mut snapshot.settings, &name)
+                {
+                    Ok(()) => {
+                        let display = idea_snapshot_display_name(&snapshot);
+                        label.set_text(&display);
+                        stack.set_visible_child_name("open");
+                        {
+                            let mut state = self.state.borrow_mut();
+                            if let Some(current) = state.current.as_mut() {
+                                if current.settings.id == snapshot.settings.id {
+                                    current.settings = snapshot.settings.clone();
+                                    state.is_stored_as_idea = true;
+                                }
+                            }
+                        }
+                        self.update_idea_pane_title();
+                        self.update_ideas_tab_label(snapshot.settings.updated_unix);
+                        self.refresh_manager();
+                        notifications::clear(&self.notice);
+                    }
+                    Err(err) => notifications::show_error(&self.notice, err.to_string()),
+                }
+            }
+            Err(err) => notifications::show_error(&self.notice, err.to_string()),
+        }
     }
 
     fn show_artist_picker_for_transfer(&self) {
@@ -1542,7 +1682,7 @@ fn transfer_image_widget(path: Option<PathBuf>, size: i32) -> gtk::Widget {
     }
 }
 
-fn idea_pane_shell(title: &str, view: &gtk::TextView) -> gtk::Box {
+fn idea_pane_shell(title: &str, view: &gtk::TextView) -> (gtk::Box, gtk::Label) {
     let shell = gtk::Box::new(gtk::Orientation::Vertical, 0);
     shell.add_css_class("pane-shell");
     shell.set_hexpand(true);
@@ -1557,7 +1697,7 @@ fn idea_pane_shell(title: &str, view: &gtk::TextView) -> gtk::Box {
         .child(view)
         .build();
     shell.append(&scrolled);
-    shell
+    (shell, label)
 }
 
 fn ideas_structure_tool_widgets() -> (
@@ -1827,6 +1967,57 @@ fn format_idea_datetime(unix: u64) -> String {
         .format("%H%M-%d%m%y")
         .map(|value| value.to_string())
         .unwrap_or_else(|_| "000000-000000".to_string())
+}
+
+fn idea_snapshot_display_name(snapshot: &IdeaSnapshot) -> String {
+    idea_display_name_for_text(
+        &snapshot.settings,
+        &snapshot.in_out,
+        &snapshot.verses,
+        &snapshot.hooks_bridges,
+    )
+}
+
+fn idea_display_name_for_text(
+    settings: &IdeaSettings,
+    in_out: &str,
+    verses: &str,
+    hooks_bridges: &str,
+) -> String {
+    let name = settings.name.trim();
+    if name.is_empty()
+        || Some(name) == auto_idea_name_for_text(in_out, verses, hooks_bridges).as_deref()
+    {
+        format_idea_datetime(settings.updated_unix)
+    } else if name.chars().any(|ch| ch.is_ascii_alphanumeric()) {
+        name.to_owned()
+    } else {
+        format_idea_datetime(settings.updated_unix)
+    }
+}
+
+fn auto_idea_name_for_text(in_out: &str, verses: &str, hooks_bridges: &str) -> Option<String> {
+    let preview = [in_out, verses, hooks_bridges]
+        .into_iter()
+        .flat_map(|text| text.split_whitespace())
+        .take(12)
+        .collect::<Vec<_>>()
+        .join(" ");
+
+    if preview.is_empty() {
+        None
+    } else {
+        Some(limit_idea_display_name(&preview, 48))
+    }
+}
+
+fn limit_idea_display_name(value: &str, max_chars: usize) -> String {
+    let clipped = value.chars().take(max_chars).collect::<String>();
+    if value.chars().count() <= max_chars {
+        clipped
+    } else {
+        format!("{}…", clipped.trim_end())
+    }
 }
 
 fn apply_search_highlights(buffer: &gtk::TextBuffer, matches: &[SearchMatch]) {

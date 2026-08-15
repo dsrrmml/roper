@@ -17,9 +17,12 @@ pub struct RepeatHighlight {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum RepeatWarningKind {
-    Skull,
-    Diamond,
-    Triangle,
+    ScatteredWeakWord,
+    AdjacentRepetition,
+    HookRepetition,
+    WordFamilyEcho,
+    PhraseEcho,
+    RepeatedLine,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -61,36 +64,187 @@ pub struct LiveHighlights {
 #[derive(Clone, Debug)]
 struct Token {
     normalized: String,
+    stem: String,
     start: usize,
     end: usize,
     line_index: usize,
 }
 
 pub fn analyze(raw_text: &str, final_text: &str) -> LiveHighlights {
-    let raw_tokens = tokenize(raw_text);
-    let final_tokens = tokenize(final_text);
-    let final_words = final_tokens
-        .iter()
-        .map(|token| token.normalized.clone())
-        .collect::<HashSet<_>>();
+    LintEngine::default().analyze(raw_text, final_text)
+}
 
-    let final_section_by_line = line_structure_map(final_text);
+#[derive(Clone, Debug, Default)]
+pub struct LintEngine {
+    raw_document: DocumentState,
+    final_document: DocumentState,
+    warnings_by_line: HashMap<usize, Vec<RepeatWarning>>,
+}
 
-    LiveHighlights {
-        raw: PaneHighlights {
-            chains: raw_used_word_ranges(&raw_tokens, &final_words),
-            repeats: Vec::new(),
-            warnings: Vec::new(),
-            structures: Vec::new(),
-        },
-        final_: PaneHighlights {
-            chains: Vec::new(),
-            repeats: final_repeated_word_highlights(&final_tokens),
-            warnings: final_repeat_warnings(&final_tokens, &final_section_by_line),
-            structures: structure_highlights(final_text),
-        },
+impl LintEngine {
+    pub fn analyze(mut self, raw_text: &str, final_text: &str) -> LiveHighlights {
+        self.update(raw_text, final_text)
+    }
+
+    pub fn update(&mut self, raw_text: &str, final_text: &str) -> LiveHighlights {
+        self.raw_document.update(raw_text);
+        self.final_document.update(final_text);
+
+        let final_words = self
+            .final_document
+            .tokens
+            .iter()
+            .map(|token| token.normalized.clone())
+            .collect::<HashSet<_>>();
+
+        let warnings = final_repeat_warnings(&self.final_document);
+        self.warnings_by_line = warnings_by_line(&warnings);
+
+        LiveHighlights {
+            raw: PaneHighlights {
+                chains: raw_used_word_ranges(&self.raw_document.tokens, &final_words),
+                repeats: Vec::new(),
+                warnings: Vec::new(),
+                structures: Vec::new(),
+            },
+            final_: PaneHighlights {
+                chains: Vec::new(),
+                repeats: final_repeated_word_highlights(&self.final_document.tokens),
+                warnings,
+                structures: structure_highlights(final_text),
+            },
+        }
     }
 }
+
+#[derive(Clone, Debug, Default)]
+struct DocumentState {
+    text: String,
+    lines: Vec<String>,
+    tokens: Vec<Token>,
+    tokens_by_line: Vec<Vec<usize>>,
+    occurrences_by_token: HashMap<String, Vec<usize>>,
+    occurrences_by_stem: HashMap<String, Vec<usize>>,
+    phrase_index: HashMap<String, Vec<PhraseOccurrence>>,
+    line_fingerprints: HashMap<String, Vec<LineOccurrence>>,
+    section_by_line: Vec<Option<StructureKind>>,
+}
+
+impl DocumentState {
+    fn update(&mut self, text: &str) {
+        let new_lines = text.lines().map(str::to_owned).collect::<Vec<_>>();
+        let structure_changed = self.text != text && structure_tags_changed(&self.text, text);
+        let changed_lines = changed_line_indexes(&self.lines, &new_lines);
+        self.text = text.to_owned();
+        self.lines = new_lines;
+
+        if structure_changed || !changed_lines.is_empty() {
+            self.rebuild_indexes();
+        }
+    }
+
+    fn rebuild_indexes(&mut self) {
+        self.tokens = tokenize(&self.text);
+        self.tokens_by_line = vec![Vec::new(); self.lines.len().max(1)];
+        self.occurrences_by_token.clear();
+        self.occurrences_by_stem.clear();
+        for (position, token) in self.tokens.iter().enumerate() {
+            if let Some(line_tokens) = self.tokens_by_line.get_mut(token.line_index) {
+                line_tokens.push(position);
+            }
+            self.occurrences_by_token
+                .entry(token.normalized.clone())
+                .or_default()
+                .push(position);
+            self.occurrences_by_stem
+                .entry(token.stem.clone())
+                .or_default()
+                .push(position);
+        }
+        self.section_by_line = line_structure_map(&self.text);
+        self.phrase_index = phrase_index(&self.tokens);
+        self.line_fingerprints = line_fingerprints(&self.lines, &self.section_by_line);
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PhraseOccurrence {
+    phrase: String,
+    range: HighlightRange,
+    line_index: usize,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct LineOccurrence {
+    fingerprint: String,
+    line_index: usize,
+}
+
+fn warnings_by_line(warnings: &[RepeatWarning]) -> HashMap<usize, Vec<RepeatWarning>> {
+    let mut by_line = HashMap::new();
+    for warning in warnings {
+        by_line
+            .entry(warning.line_index)
+            .or_insert_with(Vec::new)
+            .push(warning.clone());
+    }
+    by_line
+}
+
+fn changed_line_indexes(old_lines: &[String], new_lines: &[String]) -> HashSet<usize> {
+    let max_len = old_lines.len().max(new_lines.len());
+    (0..max_len)
+        .filter(|&index| old_lines.get(index) != new_lines.get(index))
+        .collect()
+}
+
+fn structure_tags_changed(old_text: &str, new_text: &str) -> bool {
+    structure_tags(old_text) != structure_tags(new_text)
+}
+
+fn is_ignored_stopword(word: &str) -> bool {
+    IGNORED_STOPWORDS.contains(&word)
+}
+
+fn is_common_word(word: &str) -> bool {
+    COMMON_WORDS.contains(&word)
+}
+
+fn is_weak_word(word: &str) -> bool {
+    WEAK_ECHO_WORDS.contains(&word)
+}
+
+const IGNORED_STOPWORDS: &[&str] = &[
+    "a", "an", "and", "are", "as", "at", "be", "but", "by", "der", "die", "das", "den", "dem",
+    "des", "du", "er", "es", "for", "from", "i", "ich", "im", "in", "is", "it", "me", "my", "of",
+    "on", "or", "sie", "so", "the", "to", "und", "we", "wir", "you",
+];
+
+const COMMON_WORDS: &[&str] = &[
+    "bin", "bist", "bleib", "bleibe", "geht", "gehen", "hab", "habe", "hat", "komm", "komme",
+    "kommt", "leben", "liebe", "mach", "mache", "macht", "nacht", "sag", "sage", "sagt", "seh",
+    "sehe", "tag", "weg", "welt", "zeit",
+];
+
+const WEAK_ECHO_WORDS: &[&str] = &[
+    "auch",
+    "eben",
+    "einfach",
+    "eigentlich",
+    "irgendwie",
+    "halt",
+    "schon",
+    "noch",
+    "wieder",
+    "wirklich",
+    "ziemlich",
+    "vielleicht",
+    "quasi",
+    "mal",
+    "jetzt",
+    "dann",
+    "doch",
+];
 
 pub fn structure_sequence(text: &str) -> Vec<StructureHighlight> {
     structure_highlights(text)
@@ -140,6 +294,7 @@ fn push_token(tokens: &mut Vec<Token>, text: &str, start: usize, end: usize, lin
         return;
     }
     tokens.push(Token {
+        stem: stem_word(&normalized),
         normalized,
         start,
         end,
@@ -223,103 +378,288 @@ fn repeat_ranges_for_tokens(tokens: &[Token], repeated: &HashSet<String>) -> Vec
     highlights
 }
 
-fn final_repeat_warnings(
-    tokens: &[Token],
-    line_section_by_line: &[Option<StructureKind>],
-) -> Vec<RepeatWarning> {
-    let mut positions_by_word: HashMap<&str, Vec<usize>> = HashMap::new();
-    for (position, token) in tokens.iter().enumerate() {
-        positions_by_word
-            .entry(token.normalized.as_str())
-            .or_default()
-            .push(position);
+fn final_repeat_warnings(document: &DocumentState) -> Vec<RepeatWarning> {
+    let mut warnings = Vec::new();
+
+    for positions in document
+        .occurrences_by_token
+        .values()
+        .filter(|positions| positions.len() > 1)
+    {
+        let word = document.tokens[positions[0]].normalized.as_str();
+        if is_ignored_stopword(word) {
+            continue;
+        }
+        push_exact_word_warnings(document, positions, &mut warnings);
     }
 
-    let mut warnings = Vec::new();
-    for positions in positions_by_word.values().filter(|positions| positions.len() > 1) {
-        let word_length = tokens[positions[0]].normalized.chars().count();
-        let long_word_positions: HashSet<usize> = if word_length > 5 {
-            positions.iter().copied().collect()
-        } else {
-            HashSet::new()
-        };
-        let verse_positions = positions
-            .iter()
-            .copied()
-            .filter(|&position| {
-                matches!(
-                    line_section_by_line.get(tokens[position].line_index),
-                    Some(Some(StructureKind::Verse))
-                )
-            })
-            .collect::<Vec<_>>();
-        let hook_positions = positions
-            .iter()
-            .copied()
-            .filter(|&position| {
-                matches!(
-                    line_section_by_line.get(tokens[position].line_index),
-                    Some(Some(StructureKind::Hook))
-                )
-            })
-            .collect::<Vec<_>>();
+    for positions in document
+        .occurrences_by_stem
+        .values()
+        .filter(|positions| positions.len() > 1)
+    {
+        push_word_family_warnings(document, positions, &mut warnings);
+    }
 
-        let skull_positions = consecutive_line_positions(tokens, &verse_positions);
-        let diamond_positions = consecutive_line_positions(tokens, &hook_positions);
+    for occurrences in document
+        .phrase_index
+        .values()
+        .filter(|occurrences| occurrences.len() > 1)
+    {
+        push_phrase_warnings(occurrences, &mut warnings);
+    }
 
-        for &position in positions {
-            let token = &tokens[position];
-            let warning_kind = if skull_positions.contains(&position) {
-                Some(RepeatWarningKind::Skull)
-            } else if diamond_positions.contains(&position) {
-                Some(RepeatWarningKind::Diamond)
-            } else if long_word_positions.contains(&position) {
-                Some(RepeatWarningKind::Triangle)
-            } else {
-                None
-            };
-            if let Some(kind) = warning_kind {
+    for occurrences in document
+        .line_fingerprints
+        .values()
+        .filter(|occurrences| occurrences.len() > 1)
+    {
+        for occurrence in occurrences {
+            if matches!(
+                document.section_by_line.get(occurrence.line_index),
+                Some(Some(StructureKind::Hook))
+            ) {
+                continue;
+            }
+            if let Some(range) = line_range(&document.text, occurrence.line_index) {
                 warnings.push(RepeatWarning {
-                    range: HighlightRange {
-                        start: token.start,
-                        end: token.end,
-                    },
-                    kind,
-                    line_index: token.line_index,
+                    range,
+                    kind: RepeatWarningKind::RepeatedLine,
+                    line_index: occurrence.line_index,
                 });
             }
         }
     }
 
-    warnings.sort_by(|left, right| left.range.start.cmp(&right.range.start));
+    warnings.sort_by(|left, right| {
+        left.line_index
+            .cmp(&right.line_index)
+            .then_with(|| {
+                warning_severity(left.kind)
+                    .cmp(&warning_severity(right.kind))
+                    .reverse()
+            })
+            .then_with(|| left.range.start.cmp(&right.range.start))
+    });
+    warnings.dedup_by(|left, right| {
+        left.kind == right.kind && left.line_index == right.line_index && left.range == right.range
+    });
     warnings
 }
 
-fn consecutive_line_positions(tokens: &[Token], positions: &[usize]) -> HashSet<usize> {
-    let mut positions_by_line: HashMap<usize, Vec<usize>> = HashMap::new();
+fn push_exact_word_warnings(
+    document: &DocumentState,
+    positions: &[usize],
+    warnings: &mut Vec<RepeatWarning>,
+) {
+    let word = document.tokens[positions[0]].normalized.as_str();
+    let adjacent_positions = close_line_positions(&document.tokens, positions, 2);
+    let hook_positions = positions
+        .iter()
+        .copied()
+        .filter(|&position| {
+            line_kind(document, document.tokens[position].line_index) == Some(StructureKind::Hook)
+        })
+        .collect::<HashSet<_>>();
+
+    let scattered_weak = (is_weak_word(word) || is_common_word(word))
+        && positions.len() >= 3
+        && !all_positions_close(&document.tokens, positions, 2);
+
     for &position in positions {
-        let line_index = tokens[position].line_index;
-        positions_by_line.entry(line_index).or_default().push(position);
+        let token = &document.tokens[position];
+        let kind = if hook_positions.contains(&position) {
+            RepeatWarningKind::HookRepetition
+        } else if adjacent_positions.contains(&position) {
+            RepeatWarningKind::AdjacentRepetition
+        } else if scattered_weak {
+            RepeatWarningKind::ScatteredWeakWord
+        } else {
+            continue;
+        };
+        warnings.push(token_warning(token, kind));
     }
+}
 
+fn push_word_family_warnings(
+    document: &DocumentState,
+    positions: &[usize],
+    warnings: &mut Vec<RepeatWarning>,
+) {
+    let unique_words = positions
+        .iter()
+        .map(|&position| document.tokens[position].normalized.as_str())
+        .collect::<HashSet<_>>();
+    if unique_words.len() < 2 {
+        return;
+    }
+    for &position in positions {
+        let token = &document.tokens[position];
+        if is_ignored_stopword(&token.normalized) {
+            continue;
+        }
+        warnings.push(token_warning(token, RepeatWarningKind::WordFamilyEcho));
+    }
+}
+
+fn push_phrase_warnings(occurrences: &[PhraseOccurrence], warnings: &mut Vec<RepeatWarning>) {
+    let unique_lines = occurrences
+        .iter()
+        .map(|occurrence| occurrence.line_index)
+        .collect::<HashSet<_>>();
+    if unique_lines.len() < 2 {
+        return;
+    }
+    for occurrence in occurrences {
+        warnings.push(RepeatWarning {
+            range: occurrence.range.clone(),
+            kind: RepeatWarningKind::PhraseEcho,
+            line_index: occurrence.line_index,
+        });
+    }
+}
+
+fn token_warning(token: &Token, kind: RepeatWarningKind) -> RepeatWarning {
+    RepeatWarning {
+        range: HighlightRange {
+            start: token.start,
+            end: token.end,
+        },
+        kind,
+        line_index: token.line_index,
+    }
+}
+
+fn line_kind(document: &DocumentState, line_index: usize) -> Option<StructureKind> {
+    document.section_by_line.get(line_index).copied().flatten()
+}
+
+fn warning_severity(kind: RepeatWarningKind) -> usize {
+    match kind {
+        RepeatWarningKind::ScatteredWeakWord => 6,
+        RepeatWarningKind::AdjacentRepetition => 5,
+        RepeatWarningKind::HookRepetition => 4,
+        RepeatWarningKind::WordFamilyEcho => 3,
+        RepeatWarningKind::PhraseEcho => 2,
+        RepeatWarningKind::RepeatedLine => 1,
+    }
+}
+
+fn close_line_positions(tokens: &[Token], positions: &[usize], max_gap: usize) -> HashSet<usize> {
     let mut marked = HashSet::new();
-    let mut sorted_lines = positions_by_line.keys().copied().collect::<Vec<_>>();
-    sorted_lines.sort_unstable();
-
-    for window in sorted_lines.windows(2) {
-        if window[1] == window[0] + 1 {
-            if let Some(first_positions) = positions_by_line.get(&window[0]) {
-                if let Some(second_positions) = positions_by_line.get(&window[1]) {
-                    marked.extend(first_positions);
-                    marked.extend(second_positions);
-                }
-            }
+    for window in positions.windows(2) {
+        let left = tokens[window[0]].line_index;
+        let right = tokens[window[1]].line_index;
+        if right.saturating_sub(left) <= max_gap {
+            marked.insert(window[0]);
+            marked.insert(window[1]);
         }
     }
-
     marked
 }
 
+fn all_positions_close(tokens: &[Token], positions: &[usize], max_gap: usize) -> bool {
+    positions.windows(2).all(|window| {
+        tokens[window[1]]
+            .line_index
+            .saturating_sub(tokens[window[0]].line_index)
+            <= max_gap
+    })
+}
+
+fn phrase_index(tokens: &[Token]) -> HashMap<String, Vec<PhraseOccurrence>> {
+    let mut index = HashMap::new();
+    for window_size in [2_usize, 3] {
+        for window in tokens.windows(window_size) {
+            if window
+                .iter()
+                .any(|token| is_ignored_stopword(&token.normalized))
+            {
+                continue;
+            }
+            let first = &window[0];
+            let last = &window[window.len() - 1];
+            if first.line_index != last.line_index {
+                continue;
+            }
+            let phrase = window
+                .iter()
+                .map(|token| token.normalized.as_str())
+                .collect::<Vec<_>>()
+                .join(" ");
+            index
+                .entry(phrase.clone())
+                .or_insert_with(Vec::new)
+                .push(PhraseOccurrence {
+                    phrase,
+                    range: HighlightRange {
+                        start: first.start,
+                        end: last.end,
+                    },
+                    line_index: first.line_index,
+                });
+        }
+    }
+    index
+}
+
+fn line_fingerprints(
+    lines: &[String],
+    section_by_line: &[Option<StructureKind>],
+) -> HashMap<String, Vec<LineOccurrence>> {
+    let mut fingerprints = HashMap::new();
+    for (line_index, line) in lines.iter().enumerate() {
+        if matches!(
+            section_by_line.get(line_index),
+            Some(Some(StructureKind::Hook))
+        ) {
+            continue;
+        }
+        let fingerprint = tokenize(line)
+            .into_iter()
+            .map(|token| token.normalized)
+            .filter(|word| !is_ignored_stopword(word))
+            .collect::<Vec<_>>()
+            .join(" ");
+        if fingerprint.split_whitespace().count() < 3 {
+            continue;
+        }
+        fingerprints
+            .entry(fingerprint.clone())
+            .or_insert_with(Vec::new)
+            .push(LineOccurrence {
+                fingerprint,
+                line_index,
+            });
+    }
+    fingerprints
+}
+
+fn line_range(text: &str, target_line: usize) -> Option<HighlightRange> {
+    let mut start = 0usize;
+    for (line_index, line) in text.split_inclusive('\n').enumerate() {
+        let end = start + line.trim_end_matches('\n').chars().count();
+        if line_index == target_line {
+            return Some(HighlightRange { start, end });
+        }
+        start += line.chars().count();
+    }
+    (target_line == text.lines().count()).then_some(HighlightRange { start, end: start })
+}
+
+fn stem_word(word: &str) -> String {
+    for suffix in [
+        "ungen", "keit", "lich", "isch", "ern", "en", "er", "es", "e", "s",
+    ] {
+        if word.chars().count() > suffix.chars().count() + 3 && word.ends_with(suffix) {
+            return word
+                .chars()
+                .take(word.chars().count() - suffix.chars().count())
+                .collect();
+        }
+    }
+    word.to_owned()
+}
 
 fn nearest_distance(positions: &[usize], local_index: usize) -> Option<usize> {
     if positions.len() < 2 {
@@ -639,59 +979,44 @@ mod tests {
     }
 
     #[test]
-    fn long_word_used_more_than_twice_within_four_lines_gets_skulls() {
-        let highlights = analyze("", "dangerous\none dangerous\ntwo dangerous");
-        assert_eq!(highlights.final_.warnings.len(), 3);
-        assert!(
-            highlights
-                .final_
-                .warnings
-                .iter()
-                .all(|warning| warning.kind == RepeatWarningKind::Skull)
+    fn scattered_weak_words_get_scattered_warning() {
+        let highlights = analyze(
+            "",
+            "[VERSE 1]\ndoch\nline two\nline three\nnoch doch\nline five\nline six\ndoch",
         );
-    }
-
-    #[test]
-    fn five_character_word_used_more_than_twice_within_four_lines_gets_skulls() {
-        let highlights = analyze("", "spast\nso ein spast\nso ein spast");
-        let spast_warnings = highlights
+        let scattered = highlights
             .final_
             .warnings
             .iter()
-            .filter(|warning| warning.range.end - warning.range.start == 5)
+            .filter(|warning| warning.kind == RepeatWarningKind::ScatteredWeakWord)
             .collect::<Vec<_>>();
 
-        assert_eq!(spast_warnings.len(), 3);
-        assert!(
-            spast_warnings
-                .iter()
-                .all(|warning| warning.kind == RepeatWarningKind::Skull)
-        );
+        assert_eq!(scattered.len(), 3);
     }
 
     #[test]
-    fn two_consecutive_line_uses_get_warning_polygons() {
+    fn neighboring_repeated_words_get_adjacent_repetition_warning() {
         let highlights = analyze("", "chorus\nCHORUS");
-        assert_eq!(highlights.final_.warnings.len(), 2);
-        assert!(
-            highlights
-                .final_
-                .warnings
-                .iter()
-                .all(|warning| warning.kind == RepeatWarningKind::Warning)
-        );
+        let adjacent = highlights
+            .final_
+            .warnings
+            .iter()
+            .filter(|warning| warning.kind == RepeatWarningKind::AdjacentRepetition)
+            .count();
+
+        assert_eq!(adjacent, 2);
     }
 
     #[test]
-    fn skull_warning_takes_precedence_over_consecutive_line_warning() {
-        let highlights = analyze("", "dangerous\nDANGEROUS\ndangerous");
-        assert_eq!(highlights.final_.warnings.len(), 3);
-        assert!(
-            highlights
-                .final_
-                .warnings
-                .iter()
-                .all(|warning| warning.kind == RepeatWarningKind::Skull)
-        );
+    fn hook_repetition_gets_hook_warning() {
+        let highlights = analyze("", "[HOOK]\nchorus\nCHORUS");
+        let hook = highlights
+            .final_
+            .warnings
+            .iter()
+            .filter(|warning| warning.kind == RepeatWarningKind::HookRepetition)
+            .count();
+
+        assert_eq!(hook, 2);
     }
 }

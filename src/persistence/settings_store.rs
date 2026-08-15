@@ -142,8 +142,8 @@ impl SettingsStore {
             None => return Ok(AppSettings::default()),
         };
         let bytes = fs::read(&load_path).map_err(|err| AppError::io(&load_path, err))?;
-        let mut settings: AppSettings = serde_json::from_slice(&bytes)
-            .map_err(|err| AppError::json(&load_path, err))?;
+        let mut settings: AppSettings =
+            serde_json::from_slice(&bytes).map_err(|err| AppError::json(&load_path, err))?;
         if settings.schema_version != 1 {
             return Err(AppError::validation(
                 "schema_version",
@@ -153,7 +153,9 @@ impl SettingsStore {
         if !is_valid_font_size(settings.font_size_pt) {
             settings.font_size_pt = DEFAULT_FONT_SIZE;
         }
-        if settings.start_behavior == StartBehavior::default() && settings.last_workspace_mode.is_empty() {
+        if settings.start_behavior == StartBehavior::default()
+            && settings.last_workspace_mode.is_empty()
+        {
             settings.start_behavior = StartBehavior::LastTrack;
         }
         if migrate_after_load {

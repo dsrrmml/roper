@@ -17,6 +17,9 @@ const EDITOR_MINIMAP_MARGIN_PX: i32 = 12;
 const EDITOR_MINIMAP_LABEL_FONT_PX: f64 = 12.0;
 const EDITOR_MINIMAP_LABEL_MIN_GAP_PX: f64 = 10.0;
 const EDITOR_MINIMAP_LABEL_PADDING_PX: f64 = 3.0;
+const EDITOR_MINIMAP_STRUCTURE_MIN_WIDTH_FRACTION: f64 = 0.72;
+const EDITOR_MINIMAP_LINTER_LINE_WIDTH_PX: f64 = 12.0;
+const EDITOR_MINIMAP_LINTER_LINE_HEIGHT_PX: f64 = 2.0;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum EditorMinimapStructureKind {
@@ -684,11 +687,15 @@ fn draw_editor_minimap(
         if structure > 0.0 {
             let dominant_kind = dominant_structure_kind(&structure_density[bucket]);
             let (red, green, blue) = editor_minimap_structure_color(dominant_kind);
+            let structure_width = bar_width
+                .max(content_width * EDITOR_MINIMAP_STRUCTURE_MIN_WIDTH_FRACTION)
+                .min(content_width);
+            let structure_x = width - EDITOR_MINIMAP_CONTENT_INSET_PX - structure_width;
             cr.set_source_rgba(red, green, blue, 0.74 + density * 0.16);
-            cr.rectangle(x, y, bar_width, 1.0);
+            cr.rectangle(structure_x, y, structure_width, 1.0);
             cr.fill().ok();
 
-            let accent_width = (bar_width * 0.34).clamp(2.0, content_width);
+            let accent_width = (structure_width * 0.34).clamp(2.0, content_width);
             cr.set_source_rgba(red, green, blue, 0.95);
             cr.rectangle(
                 width - EDITOR_MINIMAP_CONTENT_INSET_PX - accent_width,
@@ -726,13 +733,7 @@ fn draw_editor_minimap(
         .is_some()
         && final_warning_markers.is_some()
     {
-        draw_minimap_warning_symbols(
-            cr,
-            width,
-            height,
-            buffer,
-            final_warning_markers.unwrap(),
-        );
+        draw_minimap_warning_symbols(cr, width, height, buffer, final_warning_markers.unwrap());
     }
 }
 
@@ -763,7 +764,7 @@ fn draw_editor_minimap_number_labels(
 
         let bubble_width = (extents.width() + EDITOR_MINIMAP_LABEL_PADDING_PX * 2.0).max(8.0);
         let bubble_height = (extents.height() + EDITOR_MINIMAP_LABEL_PADDING_PX * 2.0).max(8.0);
-        let bubble_x = (width - EDITOR_MINIMAP_CONTENT_INSET_PX - bubble_width).max(1.0);
+        let bubble_x = EDITOR_MINIMAP_CONTENT_INSET_PX.min((width - bubble_width).max(1.0));
         let bubble_y = minimap_badge_y(label.y, bubble_height, height);
         let (text_red, text_green, text_blue) = minimap_badge_text_color(red, green, blue);
 
@@ -820,35 +821,69 @@ fn draw_minimap_warning_symbols(
     let text = buffer_text(buffer);
     let total_lines = text.lines().count().max(1) as f64;
     let markers = final_warning_markers.borrow();
+    let mut primary_by_line = std::collections::HashMap::new();
     for warning in markers.iter() {
+        primary_by_line
+            .entry(warning.line_index)
+            .and_modify(|current: &mut RepeatWarning| {
+                if warning_marker_severity(warning) > warning_marker_severity(current) {
+                    *current = warning.clone();
+                }
+            })
+            .or_insert_with(|| warning.clone());
+    }
+    for warning in primary_by_line.values() {
         let y = ((warning.line_index as f64 + 0.5) / total_lines) * height;
-        let marker_size = 6.0;
-        let x = width - EDITOR_MINIMAP_CONTENT_INSET_PX - marker_size * 1.2;
+        let marker_width = EDITOR_MINIMAP_LINTER_LINE_WIDTH_PX
+            .min((width - EDITOR_MINIMAP_CONTENT_INSET_PX * 2.0).max(1.0));
+        let marker_height = EDITOR_MINIMAP_LINTER_LINE_HEIGHT_PX;
+        let x = width - EDITOR_MINIMAP_CONTENT_INSET_PX - marker_width;
         match warning.kind {
-            crate::services::live_highlights::RepeatWarningKind::Skull => {
-                draw_minimap_circle(cr, x, y, marker_size, 1.0, 0.05, 0.08);
+            crate::services::live_highlights::RepeatWarningKind::ScatteredWeakWord => {
+                draw_minimap_linter_line(cr, x, y, marker_width, marker_height, 1.0, 0.05, 0.08);
             }
-            crate::services::live_highlights::RepeatWarningKind::Diamond => {
-                draw_minimap_circle(cr, x, y, marker_size, 0.12, 0.93, 0.94);
+            crate::services::live_highlights::RepeatWarningKind::AdjacentRepetition => {
+                draw_minimap_linter_line(cr, x, y, marker_width, marker_height, 0.95, 0.82, 0.26);
             }
-            crate::services::live_highlights::RepeatWarningKind::Triangle => {
-                draw_minimap_circle(cr, x, y, marker_size, 0.95, 0.82, 0.26);
+            crate::services::live_highlights::RepeatWarningKind::HookRepetition => {
+                draw_minimap_linter_line(cr, x, y, marker_width, marker_height, 0.12, 0.93, 0.94);
+            }
+            crate::services::live_highlights::RepeatWarningKind::WordFamilyEcho => {
+                draw_minimap_linter_line(cr, x, y, marker_width, marker_height, 1.0, 0.48, 0.0);
+            }
+            crate::services::live_highlights::RepeatWarningKind::PhraseEcho => {
+                draw_minimap_linter_line(cr, x, y, marker_width, marker_height, 0.64, 0.36, 1.0);
+            }
+            crate::services::live_highlights::RepeatWarningKind::RepeatedLine => {
+                draw_minimap_linter_line(cr, x, y, marker_width, marker_height, 0.58, 0.60, 0.64);
             }
         }
     }
 }
 
-fn draw_minimap_circle(
+fn warning_marker_severity(warning: &RepeatWarning) -> usize {
+    match warning.kind {
+        crate::services::live_highlights::RepeatWarningKind::ScatteredWeakWord => 6,
+        crate::services::live_highlights::RepeatWarningKind::AdjacentRepetition => 5,
+        crate::services::live_highlights::RepeatWarningKind::HookRepetition => 4,
+        crate::services::live_highlights::RepeatWarningKind::WordFamilyEcho => 3,
+        crate::services::live_highlights::RepeatWarningKind::PhraseEcho => 2,
+        crate::services::live_highlights::RepeatWarningKind::RepeatedLine => 1,
+    }
+}
+
+fn draw_minimap_linter_line(
     cr: &gtk::cairo::Context,
     x: f64,
     y: f64,
-    size: f64,
+    width: f64,
+    height: f64,
     red: f64,
     green: f64,
     blue: f64,
 ) {
     cr.set_source_rgba(red, green, blue, 0.9);
-    cr.arc(x, y, size * 0.45, 0.0, std::f64::consts::TAU);
+    cr.rectangle(x, y - height / 2.0, width, height);
     cr.fill().ok();
 }
 

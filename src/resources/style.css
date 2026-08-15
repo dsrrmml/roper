@@ -691,6 +691,17 @@ textview {
 
 .slide-panel.ideas-manager-panel .ideas-manager-row-datetime {
   font-size: 22pt;
+  min-width: 0;
+}
+
+.slide-panel.ideas-manager-panel .ideas-manager-rename-entry,
+.slide-panel.ideas-manager-panel .ideas-manager-rename-entry:focus,
+.slide-panel.ideas-manager-panel .ideas-manager-rename-entry:focus-visible,
+.slide-panel.ideas-manager-panel .ideas-manager-rename-entry:focus-within {
+  min-height: 72px;
+  font-size: 22pt;
+  min-width: 0;
+  padding: 0;
 }
 
 .slide-panel.ideas-manager-panel .ideas-manager-open-button,
@@ -705,6 +716,7 @@ textview {
 
 .slide-panel.ideas-manager-panel .row-action-stack {
   margin-left: 0;
+  min-width: 216px;
   padding: 0;
 }
 
@@ -1162,7 +1174,6 @@ textview {
   border: none;
   border-radius: 0;
   box-shadow: none;
-  min-height: 160px;
   padding: 0;
 }
 

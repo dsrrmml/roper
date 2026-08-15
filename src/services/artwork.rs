@@ -21,9 +21,12 @@ pub fn import_track_artwork(source: &Path, _paths: &TrackPaths) -> AppResult<Pat
 
 pub fn preferred_track_artwork_in_working_directory(directory: &Path) -> Option<PathBuf> {
     let artwork_dir = directory.join("artwork");
-    [artwork_dir.join("artwork.jpg"), artwork_dir.join("artwork.png")]
-        .into_iter()
-        .find(|path| path.is_file() && validate_artwork_path(path).is_ok())
+    [
+        artwork_dir.join("artwork.jpg"),
+        artwork_dir.join("artwork.png"),
+    ]
+    .into_iter()
+    .find(|path| path.is_file() && validate_artwork_path(path).is_ok())
 }
 
 pub fn import_artist_image(source: &Path, target: &Path) -> AppResult<PathBuf> {
@@ -124,7 +127,8 @@ mod tests {
 
         let png = artwork_dir.join("artwork.png");
         let jpg = artwork_dir.join("artwork.jpg");
-        let image = ImageBuffer::from_fn(32, 32, |x, y| Rgb([(x % 255) as u8, 60, (y % 255) as u8]));
+        let image =
+            ImageBuffer::from_fn(32, 32, |x, y| Rgb([(x % 255) as u8, 60, (y % 255) as u8]));
         image.save(&png).expect("png artwork can be saved");
         image.save(&jpg).expect("jpg artwork can be saved");
 
@@ -141,7 +145,8 @@ mod tests {
         fs::create_dir_all(&artwork_dir).expect("artwork dir can be created");
 
         let png = artwork_dir.join("artwork.png");
-        let image = ImageBuffer::from_fn(32, 32, |x, y| Rgb([(x % 255) as u8, 60, (y % 255) as u8]));
+        let image =
+            ImageBuffer::from_fn(32, 32, |x, y| Rgb([(x % 255) as u8, 60, (y % 255) as u8]));
         image.save(&png).expect("png artwork can be saved");
 
         assert_eq!(
@@ -155,9 +160,13 @@ mod tests {
         let dir = tempdir().expect("temp dir can be created");
         let artwork_dir = dir.path().join("artwork");
         fs::create_dir_all(&artwork_dir).expect("artwork dir can be created");
-        fs::write(artwork_dir.join("artwork.webp"), b"nope").expect("webp placeholder can be saved");
+        fs::write(artwork_dir.join("artwork.webp"), b"nope")
+            .expect("webp placeholder can be saved");
 
-        assert_eq!(preferred_track_artwork_in_working_directory(dir.path()), None);
+        assert_eq!(
+            preferred_track_artwork_in_working_directory(dir.path()),
+            None
+        );
     }
 
     #[test]

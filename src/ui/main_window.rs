@@ -9,10 +9,13 @@ use crate::persistence::settings_store::{
 use crate::persistence::track_store::{
     TrackDraft, TrackListItem, TrackPager, TrackPaths, TrackStore,
 };
-use crate::services::artwork::{import_track_artwork, preferred_track_artwork_in_working_directory};
+use crate::services::artwork::{
+    import_track_artwork, preferred_track_artwork_in_working_directory,
+};
 use crate::services::casing::apply_casing;
-use crate::services::live_highlights::{STRUCTURE_BUCKETS, StructureKind, structure_sequence};
-use crate::ui::raw_gutter::NUMBER_LANE_WIDTH;
+use crate::services::live_highlights::{
+    LintEngine, STRUCTURE_BUCKETS, StructureKind, structure_sequence,
+};
 use crate::services::material_usage::{
     add_used_material, effective_used_material, material_from_identity, raw_line_identities,
     remove_used_material,
@@ -24,6 +27,7 @@ use crate::services::validation::{
 use crate::ui::editor_panes::{
     EditorPanes, RAW_PANE_WIDTH_FRACTION, buffer_text, replace_buffer_text_preserving_cursor,
 };
+use crate::ui::raw_gutter::NUMBER_LANE_WIDTH;
 use crate::ui::{
     blur_box::BlurBox,
     confirm,
@@ -60,6 +64,7 @@ const CREDIT_FONT_MIN_PT: f64 = 16.0;
 const CREDIT_FONT_MAX_PT: f64 = 120.0;
 const POINT_TO_PIXEL: f64 = 96.0 / 72.0;
 const MATERIAL_REBUILD_DELAY: Duration = Duration::from_millis(140);
+const LIVE_LINT_DELAY: Duration = Duration::from_millis(75);
 const SEARCH_SCROLL_BOTTOM_PADDING_PX: i32 = 360;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -158,6 +163,8 @@ struct MainState {
     raw_save_source: Option<gtk::glib::SourceId>,
     settings_save_source: Option<gtk::glib::SourceId>,
     material_rebuild_source: Option<gtk::glib::SourceId>,
+    live_lint_source: Option<gtk::glib::SourceId>,
+    live_lint_engine: LintEngine,
     draft_casing_mode: CasingMode,
     pending_raw_clipboard: Option<PendingRawClipboard>,
     material_settings_dirty: bool,
@@ -207,6 +214,8 @@ pub fn show_in_window(window: &gtk::ApplicationWindow, artist: Artist) {
         raw_save_source: None,
         settings_save_source: None,
         material_rebuild_source: None,
+        live_lint_source: None,
+        live_lint_engine: LintEngine::default(),
         draft_casing_mode: app_settings.default_casing_mode,
         pending_raw_clipboard: None,
         material_settings_dirty: false,
@@ -229,14 +238,26 @@ pub fn show_in_window(window: &gtk::ApplicationWindow, artist: Artist) {
     window_policy::set_fullscreen_enabled(window, app_settings.fullscreen);
 
     let editors = Rc::new(EditorPanes::new(app_settings.font_size_pt));
-    editors.empty_line_pattern_enabled.set(app_settings.empty_line_pattern);
-    editors.symbols_in_minimap.set(app_settings.symbols_in_minimap);
-    editors.line_numbers_enabled.set(app_settings.show_line_numbers);
+    editors
+        .empty_line_pattern_enabled
+        .set(app_settings.empty_line_pattern);
+    editors
+        .symbols_in_minimap
+        .set(app_settings.symbols_in_minimap);
+    editors
+        .line_numbers_enabled
+        .set(app_settings.show_line_numbers);
     // Apply initial visibility and left-margin based on setting
-    editors.final_gutter.set_visible(app_settings.show_line_numbers);
+    editors
+        .final_gutter
+        .set_visible(app_settings.show_line_numbers);
     editors
         .final_view
-        .set_left_margin(if app_settings.show_line_numbers { NUMBER_LANE_WIDTH } else { 0 }); // was 8
+        .set_left_margin(if app_settings.show_line_numbers {
+            NUMBER_LANE_WIDTH
+        } else {
+            0
+        }); // was 8
     editors.set_track_connection(false);
     let root_overlay = gtk::Overlay::new();
     root_overlay.set_hexpand(true);
@@ -260,7 +281,8 @@ pub fn show_in_window(window: &gtk::ApplicationWindow, artist: Artist) {
     editor_mode_stack.set_vexpand(true);
     editor_mode_stack.add_named(&editors.root, Some("tracks-editor"));
     editor_mode_stack.add_named(&ideas_workspace.root, Some("ideas-editor"));
-    editor_mode_stack.set_visible_child_name(startup_workspace_child_name(app_settings.start_behavior));
+    editor_mode_stack
+        .set_visible_child_name(startup_workspace_child_name(app_settings.start_behavior));
     background_overlay.set_child(Some(&editor_mode_stack));
     background_blur.append(&background_overlay);
     root_overlay.set_child(Some(&background_blur));
@@ -1331,7 +1353,8 @@ fn show_create_track_panel(
                             working_directory.set_text(&path.to_string_lossy());
                             *working_directory_source.borrow_mut() = Some(path.clone());
                             if !artwork_selection_is_manual.get() {
-                                let auto_artwork = preferred_track_artwork_in_working_directory(&path);
+                                let auto_artwork =
+                                    preferred_track_artwork_in_working_directory(&path);
                                 set_track_artwork_preview(
                                     &artwork_preview,
                                     &artwork_placeholder,
@@ -1836,6 +1859,7 @@ fn request_remove_track(
                     update_artwork(&state, &artwork);
                     update_track_name_label(&state, &track_name_label);
                     rebuild_material_ui(&state, &editors, &overlay, &notice);
+                    refresh_live_lint(&state, &editors);
                 }
                 notifications::show_info(&notice, "Track removed.");
                 open_track_overlay(
@@ -1953,7 +1977,12 @@ fn track_structure_bubbles(paths: &TrackPaths) -> gtk::Box {
     let mut bubble_specs = Vec::new();
     for section in sections {
         let length = section.range.end.saturating_sub(section.range.start);
-        let bubble = structure_bubble(section.kind, section.bucket, STRUCTURE_BUBBLE_MIN_WIDTH, length);
+        let bubble = structure_bubble(
+            section.kind,
+            section.bucket,
+            STRUCTURE_BUBBLE_MIN_WIDTH,
+            length,
+        );
         bubbles.append(&bubble);
         bubble_specs.push((bubble, length));
     }
@@ -2171,6 +2200,7 @@ fn set_open_track(
     update_track_name_label(state, track_name_label);
     update_track_menu_state(state, overlay);
     rebuild_material_ui(state, editors, overlay, notice);
+    refresh_live_lint(state, editors);
     notifications::clear(notice);
 }
 
@@ -2288,6 +2318,7 @@ fn on_final_changed(
     }
 
     schedule_material_rebuild(state, editors, overlay, notice);
+    schedule_live_lint(state, editors);
     if state.borrow().current.is_some() {
         schedule_final_save(state, editors, notice);
         if state.borrow().material_settings_dirty {
@@ -2382,6 +2413,7 @@ fn on_raw_changed(
         return;
     }
     schedule_material_rebuild(state, editors, overlay, notice);
+    schedule_live_lint(state, editors);
     if state.borrow().current.is_some() {
         schedule_raw_save(state, editors, notice);
     } else {
@@ -2423,6 +2455,7 @@ fn cycle_casing(
     replace_buffer_text_preserving_cursor(&editors.final_buffer, &final_text);
     state.borrow_mut().programmatic_text_change = false;
     rebuild_material_ui(state, editors, overlay, notice);
+    refresh_live_lint(state, editors);
     if state.borrow().current.is_some() {
         save_final_now(state, editors, notice);
         save_settings_now(state, notice);
@@ -2503,17 +2536,41 @@ fn rebuild_material_ui(
         transfer,
         unmark,
     );
-    live_highlights::apply(
+    raw_gutter::apply_used_highlights(&editors.raw_buffer, &raw_text, mode, &used);
+}
+
+fn refresh_live_lint(state: &Rc<RefCell<MainState>>, editors: &Rc<EditorPanes>) {
+    let raw_text = editors.raw_text();
+    let final_text = editors.final_text();
+    let empty_line_pattern = state.borrow().app_settings.empty_line_pattern;
+    let highlights = {
+        let mut state_ref = state.borrow_mut();
+        state_ref.live_lint_engine.update(&raw_text, &final_text)
+    };
+    live_highlights::apply_highlights(
         &editors.raw_buffer,
         &editors.final_buffer,
         &editors.final_view,
         &editors.final_warning_layer,
-        state.borrow().app_settings.empty_line_pattern,
-        &raw_text,
-        &final_text,
+        empty_line_pattern,
+        &highlights,
         &editors.final_warning_markers,
     );
-    raw_gutter::apply_used_highlights(&editors.raw_buffer, &raw_text, mode, &used);
+    editors.final_minimap.queue_draw();
+}
+
+fn schedule_live_lint(state: &Rc<RefCell<MainState>>, editors: &Rc<EditorPanes>) {
+    if let Some(source) = state.borrow_mut().live_lint_source.take() {
+        source.remove();
+    }
+    let state = state.clone();
+    let editors = editors.clone();
+    let state_for_source = state.clone();
+    let source = gtk::glib::timeout_add_local_once(LIVE_LINT_DELAY, move || {
+        state_for_source.borrow_mut().live_lint_source = None;
+        refresh_live_lint(&state_for_source, &editors);
+    });
+    state.borrow_mut().live_lint_source = Some(source);
 }
 
 fn schedule_material_rebuild(
@@ -2678,6 +2735,9 @@ fn clear_pending_save_sources(state: &Rc<RefCell<MainState>>) {
         source.remove();
     }
     if let Some(source) = state_ref.material_rebuild_source.take() {
+        source.remove();
+    }
+    if let Some(source) = state_ref.live_lint_source.take() {
         source.remove();
     }
 }
@@ -2915,7 +2975,10 @@ fn wire_editor_stats(
 }
 
 fn update_editor_stats(widgets: &EditorStatsWidgets, editors: &EditorPanes) {
-    update_editor_stats_widgets(widgets, pane_text_stats(&editors.raw_text(), &editors.final_text()));
+    update_editor_stats_widgets(
+        widgets,
+        pane_text_stats(&editors.raw_text(), &editors.final_text()),
+    );
 }
 
 fn editor_text_stats(text: &str) -> EditorTextStats {
@@ -3005,7 +3068,12 @@ fn track_row_stats(
     )
 }
 
-fn update_split_stat_bubble(widgets: &SplitStatBubbleWidgets, label: &str, raw_count: usize, final_count: usize) {
+fn update_split_stat_bubble(
+    widgets: &SplitStatBubbleWidgets,
+    label: &str,
+    raw_count: usize,
+    final_count: usize,
+) {
     widgets.raw.set_label(&split_stat_text(label, raw_count));
     widgets
         .final_pane
@@ -3034,12 +3102,18 @@ fn update_current_track_stats(state: &Rc<RefCell<MainState>>, editors: &EditorPa
         let Some(open) = &state_ref.current else {
             return;
         };
-        state_ref.track_stats_widgets.get(&open.settings.id).cloned()
+        state_ref
+            .track_stats_widgets
+            .get(&open.settings.id)
+            .cloned()
     };
     let Some(widgets) = widgets else {
         return;
     };
-    update_track_stats_widgets(&widgets, pane_text_stats(&editors.raw_text(), &editors.final_text()));
+    update_track_stats_widgets(
+        &widgets,
+        pane_text_stats(&editors.raw_text(), &editors.final_text()),
+    );
 }
 
 fn structure_tool_widgets() -> StructureToolWidgets {
@@ -3752,12 +3826,16 @@ pub fn startup_artist(app_settings: &AppSettings) -> Artist {
         .and_then(|store| store.load())
         .ok()
         .and_then(|file| {
-            file.artists.iter().find(|artist| {
-                app_settings
-                    .last_artist_id
-                    .as_deref()
-                    .is_some_and(|last_artist_id| artist.id == last_artist_id)
-            }).cloned().or_else(|| file.artists.into_iter().next())
+            file.artists
+                .iter()
+                .find(|artist| {
+                    app_settings
+                        .last_artist_id
+                        .as_deref()
+                        .is_some_and(|last_artist_id| artist.id == last_artist_id)
+                })
+                .cloned()
+                .or_else(|| file.artists.into_iter().next())
         })
         .unwrap_or_else(placeholder_artist)
 }
@@ -3777,7 +3855,11 @@ fn sync_artist_context_for_track(
     let Ok(file) = store.load() else {
         return;
     };
-    let Some(artist) = file.artists.into_iter().find(|candidate| candidate.id == artist_id) else {
+    let Some(artist) = file
+        .artists
+        .into_iter()
+        .find(|candidate| candidate.id == artist_id)
+    else {
         return;
     };
 
@@ -4270,15 +4352,18 @@ fn show_settings_tab(
     let show_line_numbers_toggle = settings_icon_toggle_button(show_line_numbers_enabled);
     show_line_numbers_toggle.set_halign(gtk::Align::End);
 
-    overlay
-        .settings_box
-        .append(&settings_row("empty lines pattern", &empty_line_pattern_toggle));
-    overlay
-        .settings_box
-        .append(&settings_row("show line numbers", &show_line_numbers_toggle));
-    overlay
-        .settings_box
-        .append(&settings_row("symbols in minimap", &symbols_in_minimap_toggle));
+    overlay.settings_box.append(&settings_row(
+        "empty lines pattern",
+        &empty_line_pattern_toggle,
+    ));
+    overlay.settings_box.append(&settings_row(
+        "show line numbers",
+        &show_line_numbers_toggle,
+    ));
+    overlay.settings_box.append(&settings_row(
+        "symbols in minimap",
+        &symbols_in_minimap_toggle,
+    ));
     overlay
         .settings_box
         .append(&settings_row("settings file", &settings_path_label));
@@ -4375,7 +4460,9 @@ fn show_settings_tab(
             }
             editors.line_numbers_enabled.set(enabled);
             editors.final_gutter.set_visible(enabled);
-            editors.final_view.set_left_margin(if enabled { NUMBER_LANE_WIDTH } else { 8 });
+            editors
+                .final_view
+                .set_left_margin(if enabled { NUMBER_LANE_WIDTH } else { 8 });
             editors.final_view.queue_draw();
             editors.final_gutter.queue_draw();
         });
@@ -4464,6 +4551,7 @@ fn show_settings_tab(
                 replace_buffer_text_preserving_cursor(&editors.final_buffer, &final_text);
                 state.borrow_mut().programmatic_text_change = false;
                 rebuild_material_ui(&state, &editors, &overlay, &notice);
+                refresh_live_lint(&state, &editors);
             }
             ideas_workspace.set_default_casing(mode);
             update_casing_button(&state, &lower_left_casing_button);
@@ -6322,7 +6410,10 @@ mod tests {
     #[test]
     fn track_structure_bubble_width_represents_section_length() {
         assert_eq!(structure_bubble_width(100, 100, 400), 400);
-        assert_eq!(structure_bubble_width(0, 100, 400), STRUCTURE_BUBBLE_MIN_WIDTH);
+        assert_eq!(
+            structure_bubble_width(0, 100, 400),
+            STRUCTURE_BUBBLE_MIN_WIDTH
+        );
         assert_eq!(structure_bubble_width(50, 100, 400), 200);
         assert!(structure_bubble_width(25, 100, 400) < structure_bubble_width(75, 100, 400));
     }
@@ -6336,10 +6427,7 @@ mod tests {
 
     #[test]
     fn track_structure_bubble_width_is_capped_at_available_width() {
-        assert_eq!(
-            structure_bubble_width(usize::MAX, usize::MAX, 400),
-            400
-        );
+        assert_eq!(structure_bubble_width(usize::MAX, usize::MAX, 400), 400);
     }
 
     #[test]
@@ -6448,10 +6536,22 @@ mod tests {
 
     #[test]
     fn structure_tool_intro_and_outro_visibility_follow_final_editor_tags() {
-        assert!(structure_kind_used_in_final_text("[intro]\nstart", StructureKind::Intro));
-        assert!(structure_kind_used_in_final_text("[OUTRO]\nclose", StructureKind::Outro));
-        assert!(!structure_kind_used_in_final_text("[verse 1]\na", StructureKind::Intro));
-        assert!(!structure_kind_used_in_final_text("[hook]\na", StructureKind::Outro));
+        assert!(structure_kind_used_in_final_text(
+            "[intro]\nstart",
+            StructureKind::Intro
+        ));
+        assert!(structure_kind_used_in_final_text(
+            "[OUTRO]\nclose",
+            StructureKind::Outro
+        ));
+        assert!(!structure_kind_used_in_final_text(
+            "[verse 1]\na",
+            StructureKind::Intro
+        ));
+        assert!(!structure_kind_used_in_final_text(
+            "[hook]\na",
+            StructureKind::Outro
+        ));
     }
 
     #[test]

@@ -276,7 +276,10 @@ impl TrackStore {
         self.latest_opened_track_filtered(Some(artist_id))
     }
 
-    fn latest_opened_track_filtered(&self, artist_id: Option<&str>) -> AppResult<Option<TrackListItem>> {
+    fn latest_opened_track_filtered(
+        &self,
+        artist_id: Option<&str>,
+    ) -> AppResult<Option<TrackListItem>> {
         let ids = self.existing_track_ids()?;
         let mut latest: Option<TrackListItem> = None;
         for id in ids {
